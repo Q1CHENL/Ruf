@@ -1,0 +1,37 @@
+import Foundation
+import Observation
+
+public enum AppSwitcherMode: String, Sendable {
+    case system
+    case ruf
+}
+
+@MainActor
+@Observable
+public final class AppPreferences {
+    private enum Key {
+        static let switcherMode = "switcherMode"
+    }
+
+    private let defaults: UserDefaults
+
+    public var switcherMode: AppSwitcherMode {
+        didSet {
+            guard switcherMode != oldValue else {
+                return
+            }
+
+            defaults.set(switcherMode.rawValue, forKey: Key.switcherMode)
+        }
+    }
+
+    public convenience init() {
+        self.init(defaults: .standard)
+    }
+
+    public init(defaults: UserDefaults) {
+        self.defaults = defaults
+        switcherMode = defaults.string(forKey: Key.switcherMode)
+            .flatMap(AppSwitcherMode.init(rawValue:)) ?? .ruf
+    }
+}

@@ -1,0 +1,5 @@
+.build/
+.codex/
+.DS_Store
+.vscode/
+dist/
