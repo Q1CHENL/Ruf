@@ -36,14 +36,16 @@ struct SwitcherView: View {
     let onChoose: (Int) -> Void
 
     var body: some View {
+        // Derive indices from the same snapshot captured by the row closures.
+        let applications = model.applications
         let selectedIndex = model.selectedIndex
-        let navigation = model.navigation
+        let navigation = GridNavigation(itemCount: applications.count)
 
         VStack(spacing: SwitcherMetrics.verticalSpacing) {
             ForEach(0..<navigation.rowCount, id: \.self) { row in
                 HStack(spacing: SwitcherMetrics.horizontalSpacing) {
                     ForEach(navigation.indices(inRow: row), id: \.self) { index in
-                        let item = model.applications[index]
+                        let item = applications[index]
                         ApplicationCell(
                             item: item,
                             isSelected: selectedIndex == index,
