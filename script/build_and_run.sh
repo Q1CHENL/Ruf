@@ -36,7 +36,7 @@ stop_running_app() {
 
 archive_app() {
     rm -f "$APP_ARCHIVE"
-    /usr/bin/ditto -c -k --keepParent "$APP_BUNDLE" "$APP_ARCHIVE"
+    /usr/bin/ditto -c -k --norsrc --keepParent "$APP_BUNDLE" "$APP_ARCHIVE"
 }
 
 compile_app_icon() {
