@@ -37,17 +37,17 @@ struct SwitcherView: View {
 
     var body: some View {
         // Derive indices from the same snapshot captured by the row closures.
-        let applications = model.applications
+        let targets = model.targets
         let selectedIndex = model.selectedIndex
-        let navigation = GridNavigation(itemCount: applications.count)
+        let navigation = GridNavigation(itemCount: targets.count)
 
         VStack(spacing: SwitcherMetrics.verticalSpacing) {
             ForEach(0..<navigation.rowCount, id: \.self) { row in
                 HStack(spacing: SwitcherMetrics.horizontalSpacing) {
                     ForEach(navigation.indices(inRow: row), id: \.self) { index in
-                        let item = applications[index]
-                        ApplicationCell(
-                            item: item,
+                        let target = targets[index]
+                        SwitchTargetCell(
+                            target: target,
                             isSelected: selectedIndex == index,
                             onChoose: { onChoose(index) }
                         )
@@ -59,19 +59,19 @@ struct SwitcherView: View {
         .padding(SwitcherMetrics.containerInset)
         .animation(.easeOut(duration: 0.08), value: model.selectedIndex)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Ruf app grid")
+        .accessibilityLabel("Ruf app and window grid")
     }
 }
 
-private struct ApplicationCell: View {
-    let item: ApplicationItem
+private struct SwitchTargetCell: View {
+    let target: SwitchTarget
     let isSelected: Bool
     let onChoose: () -> Void
 
     var body: some View {
         Button(action: onChoose) {
             VStack(spacing: 3) {
-                Image(nsImage: item.icon)
+                Image(nsImage: target.item.icon)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .frame(width: SwitcherMetrics.iconSize, height: SwitcherMetrics.iconSize)
@@ -93,19 +93,50 @@ private struct ApplicationCell: View {
                         }
                     }
 
-                Text(item.name)
-                    .font(.system(size: 11, weight: .medium))
-                    .lineLimit(1)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .foregroundStyle(.primary.opacity(0.75))
-                    .opacity(isSelected ? 1 : 0)
+                SwitchTargetLabel(
+                    title: target.title,
+                    isWindowTitle: target.window != nil,
+                    isSelected: isSelected
+                )
             }
             .frame(width: SwitcherMetrics.cellSize.width, height: SwitcherMetrics.cellSize.height)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .zIndex(isSelected ? 1 : 0)
-        .accessibilityLabel(item.name)
+        .accessibilityLabel(target.accessibilityLabel)
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+    }
+}
+
+private struct SwitchTargetLabel: View {
+    private let windowTitleWidth = SwitcherMetrics.cellSize.width
+        + SwitcherMetrics.horizontalSpacing
+
+    let title: String
+    let isWindowTitle: Bool
+    let isSelected: Bool
+
+    var body: some View {
+        Group {
+            if isWindowTitle {
+                Text(title)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(width: windowTitleWidth)
+            } else {
+                Text(title)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+        }
+        .foregroundStyle(
+            Color.primary.opacity(isSelected ? 0.75 : 0.35)
+        )
+        .opacity(isWindowTitle || isSelected ? 1 : 0)
+        .font(.system(size: 11, weight: .medium))
+        .transaction { transaction in
+            transaction.animation = nil
+        }
     }
 }

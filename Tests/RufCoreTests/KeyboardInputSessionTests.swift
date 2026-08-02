@@ -51,6 +51,26 @@ final class KeyboardInputSessionTests: XCTestCase {
         }
     }
 
+    func testReturnCommitsTheSelectedTarget() {
+        for keyCode in [KeyboardKeyCode.returnKey, KeyboardKeyCode.keypadEnter] {
+            var session = cyclingSession()
+
+            let decision = session.interpret(
+                KeyboardInput(
+                    kind: .keyDown,
+                    keyCode: keyCode,
+                    modifiers: [.command]
+                )
+            )
+
+            XCTAssertEqual(
+                decision,
+                KeyboardDecision(action: .commit, isConsumed: true)
+            )
+            XCTAssertFalse(session.isCycling)
+        }
+    }
+
     func testOpenSwitcherConsumesUnknownCommandsAndKeyUpEvents() {
         var session = cyclingSession()
 

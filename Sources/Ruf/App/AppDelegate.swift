@@ -36,11 +36,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var accessibilityMenuItem: NSMenuItem?
     private var permissionMonitor: Timer?
     private var remainingPermissionChecks = 0
+    private var snapshotTask: Task<Void, Never>?
+    private var pendingActions: [SwitcherAction] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installStatusItem()
-        let initialApplications = catalog.snapshot()
-        panelController.prepare(itemCount: initialApplications.count)
+        panelController.prepare(itemCount: 0)
         applySwitcherMode()
         softwareUpdateController.start()
     }
@@ -62,22 +63,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        snapshotTask?.cancel()
         stopPermissionMonitoring()
         keyboardEventTap.stop()
     }
 
     private func handle(_ command: SwitcherAction) {
+        if snapshotTask != nil {
+            if case .cancel = command {
+                cancelSwitcher()
+            } else {
+                pendingActions.append(command)
+            }
+            return
+        }
+
         switch command {
         case let .cycle(backwards):
             if model.isPresented {
                 model.move(backwards ? .backward : .forward)
             } else {
-                let applications = catalog.snapshot()
-                model.begin(with: applications, backwards: backwards)
-
-                if model.isPresented {
-                    panelController.show(itemCount: applications.count)
-                }
+                loadTargets(backwards: backwards)
             }
         case let .move(move):
             model.move(move)
@@ -88,14 +94,71 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    private func loadTargets(backwards: Bool) {
+        pendingActions = []
+        snapshotTask = Task { [weak self] in
+            guard let self else {
+                return
+            }
+
+            let targets = await catalog.snapshot()
+            guard !Task.isCancelled else {
+                return
+            }
+
+            finishLoadingTargets(targets, backwards: backwards)
+        }
+    }
+
+    private func finishLoadingTargets(
+        _ targets: [SwitchTarget],
+        backwards: Bool
+    ) {
+        snapshotTask = nil
+        let actions = pendingActions
+        pendingActions = []
+
+        guard !targets.isEmpty else {
+            keyboardEventTap.resetInputSession()
+            return
+        }
+
+        model.begin(with: targets, backwards: backwards)
+
+        for action in actions {
+            handle(action)
+            guard model.isPresented else {
+                return
+            }
+        }
+
+        panelController.show(itemCount: targets.count)
+    }
+
     private func commitSelection() {
         keyboardEventTap.resetInputSession()
-        let application = model.finish()
+        let target = model.finish()
         panelController.hide()
-        application?.activate(options: [.activateAllWindows])
+
+        guard let target else {
+            return
+        }
+
+        if let window = target.window {
+            ApplicationWindowService.activate(
+                window,
+                in: target.item.application
+            )
+        } else {
+            target.item.application.activate(options: [.activateAllWindows])
+        }
     }
 
     private func cancelSwitcher() {
+        snapshotTask?.cancel()
+        snapshotTask = nil
+        pendingActions = []
+        keyboardEventTap.resetInputSession()
         model.cancel()
         panelController.cancel()
     }
@@ -115,6 +178,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         let menu = NSMenu()
+        menu.autoenablesItems = false
         menu.delegate = self
         menu.addItem(
             withTitle: "Settings…",
@@ -148,10 +212,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         updateSoftwareUpdateMenuItem()
-        let accessibilityGranted = preferences.switcherMode == .ruf
-            && !keyboardEventTap.isRunning
-            && AccessibilityPermission.isGranted
-        updateAccessibilityMenuItem(accessibilityGranted: accessibilityGranted)
+        updateAccessibilityMenuItem(
+            accessibilityGranted: AccessibilityPermission.isGranted
+        )
     }
 
     private func updateSoftwareUpdateMenuItem() {

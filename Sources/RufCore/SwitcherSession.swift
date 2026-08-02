@@ -12,16 +12,23 @@ public struct SwitcherSession: Equatable, Sendable {
         GridNavigation(itemCount: itemCount)
     }
 
-    public mutating func begin(itemCount: Int, backwards: Bool) {
-        guard itemCount > 0 else {
+    public mutating func begin<Group: Equatable>(
+        groupIdentifiers: [Group],
+        backwards: Bool
+    ) {
+        guard let currentGroup = groupIdentifiers.first else {
             clear()
             return
         }
 
-        self.itemCount = itemCount
-        selectedIndex = itemCount == 1
-            ? 0
-            : backwards ? itemCount - 1 : 1
+        itemCount = groupIdentifiers.count
+        let differentGroupIndex = backwards
+            ? groupIdentifiers.lastIndex { $0 != currentGroup }
+            : groupIdentifiers.firstIndex { $0 != currentGroup }
+        let fallbackMove: GridMove = backwards ? .backward : .forward
+
+        selectedIndex = differentGroupIndex
+            ?? navigation.moving(from: 0, fallbackMove)
     }
 
     public mutating func move(_ move: GridMove) {

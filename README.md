@@ -7,8 +7,8 @@ A simple macOS app switcher with a matrix-style layout.
 ## Requirements
 
 - macOS 26 or later
-- Accessibility permission, used only to replace the system `Command-Tab`
-  shortcut
+- Accessibility permission, used to capture `Command-Tab` and enumerate and
+  activate application windows
 
 ## Build and run
 

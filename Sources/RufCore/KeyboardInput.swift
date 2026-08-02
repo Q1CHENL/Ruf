@@ -19,6 +19,8 @@ public struct KeyboardModifiers: OptionSet, Sendable {
 
 public enum KeyboardKeyCode {
     public static let tab: Int64 = 48
+    public static let returnKey: Int64 = 36
+    public static let keypadEnter: Int64 = 76
     public static let escape: Int64 = 53
     public static let leftArrow: Int64 = 123
     public static let rightArrow: Int64 = 124
@@ -124,6 +126,11 @@ public struct KeyboardInputSession: Sendable {
 
         if input.keyCode == KeyboardKeyCode.escape {
             return KeyboardDecision(action: .cancel, isConsumed: true)
+        }
+
+        if input.keyCode == KeyboardKeyCode.returnKey
+            || input.keyCode == KeyboardKeyCode.keypadEnter {
+            return KeyboardDecision(action: .commit, isConsumed: true)
         }
 
         guard input.modifiers.contains(.command) else {

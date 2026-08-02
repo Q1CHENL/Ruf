@@ -2,27 +2,46 @@ import XCTest
 @testable import RufCore
 
 final class SwitcherSessionTests: XCTestCase {
-    func testBeginChoosesTheNextItemInTheRequestedDirection() {
+    func testBeginSelectsTheFirstTargetOutsideTheCurrentGroup() {
         var session = SwitcherSession()
 
-        session.begin(itemCount: 4, backwards: false)
+        session.begin(
+            groupIdentifiers: [0, 0, 0, 1, 2, 2],
+            backwards: false
+        )
         XCTAssertTrue(session.isPresented)
-        XCTAssertEqual(session.selectedIndex, 1)
-
-        session.begin(itemCount: 4, backwards: true)
         XCTAssertEqual(session.selectedIndex, 3)
 
-        session.begin(itemCount: 1, backwards: false)
+        session.begin(
+            groupIdentifiers: [0, 0, 0, 1, 2, 2],
+            backwards: true
+        )
+        XCTAssertEqual(session.selectedIndex, 5)
+    }
+
+    func testBeginFallsBackToCyclingWithinTheOnlyGroup() {
+        var session = SwitcherSession()
+
+        session.begin(groupIdentifiers: [0, 0, 0], backwards: false)
+        XCTAssertEqual(session.selectedIndex, 1)
+
+        session.begin(groupIdentifiers: [0, 0, 0], backwards: true)
+        XCTAssertEqual(session.selectedIndex, 2)
+
+        session.begin(groupIdentifiers: [0], backwards: false)
         XCTAssertEqual(session.selectedIndex, 0)
 
-        session.begin(itemCount: 0, backwards: false)
+        session.begin(groupIdentifiers: [Int](), backwards: false)
         XCTAssertFalse(session.isPresented)
         XCTAssertNil(session.selectedIndex)
     }
 
     func testMoveSelectFinishAndCancelMaintainSessionState() {
         var session = SwitcherSession()
-        session.begin(itemCount: 7, backwards: false)
+        session.begin(
+            groupIdentifiers: Array(0..<7),
+            backwards: false
+        )
 
         session.move(.right)
         XCTAssertEqual(session.selectedIndex, 2)
@@ -32,7 +51,10 @@ final class SwitcherSessionTests: XCTestCase {
         XCTAssertFalse(session.isPresented)
         XCTAssertNil(session.selectedIndex)
 
-        session.begin(itemCount: 3, backwards: false)
+        session.begin(
+            groupIdentifiers: Array(0..<3),
+            backwards: false
+        )
         session.cancel()
         XCTAssertFalse(session.isPresented)
         XCTAssertNil(session.selectedIndex)

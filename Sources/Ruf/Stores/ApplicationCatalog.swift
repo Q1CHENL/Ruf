@@ -29,7 +29,26 @@ final class ApplicationCatalog: NSObject {
         )
     }
 
-    func snapshot() -> [ApplicationItem] {
+    func snapshot() async -> [SwitchTarget] {
+        let applications = applicationSnapshot()
+        let windowsByProcessIdentifier = await ApplicationWindowService.multipleWindows(
+            for: applications.map(\.application.processIdentifier)
+        )
+
+        return applications.flatMap { item -> [SwitchTarget] in
+            guard let windows = windowsByProcessIdentifier[
+                item.application.processIdentifier
+            ] else {
+                return [SwitchTarget(item: item, window: nil)]
+            }
+
+            return windows.map { window in
+                SwitchTarget(item: item, window: window)
+            }
+        }
+    }
+
+    private func applicationSnapshot() -> [ApplicationItem] {
         if let frontmostApplication = workspace.frontmostApplication {
             recordActivation(frontmostApplication)
         }

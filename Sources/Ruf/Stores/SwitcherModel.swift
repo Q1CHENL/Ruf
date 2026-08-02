@@ -1,11 +1,10 @@
-import AppKit
 import RufCore
 import Observation
 
 @MainActor
 @Observable
 final class SwitcherModel {
-    private(set) var applications: [ApplicationItem] = []
+    private(set) var targets: [SwitchTarget] = []
     private var session = SwitcherSession()
 
     var selectedIndex: Int? {
@@ -16,13 +15,12 @@ final class SwitcherModel {
         session.isPresented
     }
 
-    var navigation: GridNavigation {
-        session.navigation
-    }
-
-    func begin(with applications: [ApplicationItem], backwards: Bool) {
-        self.applications = applications
-        session.begin(itemCount: applications.count, backwards: backwards)
+    func begin(with targets: [SwitchTarget], backwards: Bool) {
+        self.targets = targets
+        session.begin(
+            groupIdentifiers: targets.map(\.item.bundleIdentifier),
+            backwards: backwards
+        )
     }
 
     func move(_ move: GridMove) {
@@ -33,17 +31,17 @@ final class SwitcherModel {
         session.select(index)
     }
 
-    func finish() -> NSRunningApplication? {
-        let selectedApplication = session.finish().map { index in
-            applications[index].application
+    func finish() -> SwitchTarget? {
+        let selectedTarget = session.finish().map { index in
+            targets[index]
         }
 
-        applications = []
-        return selectedApplication
+        targets = []
+        return selectedTarget
     }
 
     func cancel() {
         session.cancel()
-        applications = []
+        targets = []
     }
 }
