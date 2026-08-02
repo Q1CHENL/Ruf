@@ -54,10 +54,9 @@ public struct GridNavigation: Sendable {
         case .backward:
             return (index - 1 + itemCount) % itemCount
         case .left:
-            return index % columnCount > 0 ? index - 1 : index
+            return max(0, index - 1)
         case .right:
-            let hasNextColumn = index % columnCount + 1 < columnCount
-            return hasNextColumn && index + 1 < itemCount ? index + 1 : index
+            return min(itemCount - 1, index + 1)
         case .up:
             return movingVertically(from: index, rowOffset: -1)
         case .down:

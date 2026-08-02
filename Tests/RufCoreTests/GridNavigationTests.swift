@@ -22,16 +22,25 @@ final class GridNavigationTests: XCTestCase {
         XCTAssertEqual(navigation.moving(from: 3, .backward), 2)
     }
 
-    func testArrowMovementFollowsRowsAndColumnsWithoutWrapping() {
+    func testHorizontalArrowsContinueAcrossRowBoundaries() {
         let navigation = GridNavigation(itemCount: 7)
 
         XCTAssertEqual(navigation.moving(from: 4, .left), 3)
         XCTAssertEqual(navigation.moving(from: 4, .right), 5)
-        XCTAssertEqual(navigation.moving(from: 4, .up), 1)
+        XCTAssertEqual(navigation.moving(from: 2, .right), 3)
+        XCTAssertEqual(navigation.moving(from: 3, .left), 2)
+        XCTAssertEqual(navigation.moving(from: 5, .right), 6)
+        XCTAssertEqual(navigation.moving(from: 6, .left), 5)
 
         XCTAssertEqual(navigation.moving(from: 0, .left), 0)
-        XCTAssertEqual(navigation.moving(from: 0, .up), 0)
         XCTAssertEqual(navigation.moving(from: 6, .right), 6)
+    }
+
+    func testVerticalArrowsStayWithinTheGrid() {
+        let navigation = GridNavigation(itemCount: 7)
+
+        XCTAssertEqual(navigation.moving(from: 4, .up), 1)
+        XCTAssertEqual(navigation.moving(from: 0, .up), 0)
         XCTAssertEqual(navigation.moving(from: 6, .down), 6)
     }
 
