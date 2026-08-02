@@ -1,10 +1,12 @@
 import AppKit
 import ApplicationServices
 import Foundation
+import RufCore
 
 enum ApplicationWindowService {
     private static let messageTimeout: Float = 0.075
-    private static let queryBudget = DispatchTimeInterval.milliseconds(250)
+    private static let totalQueryBudget = DispatchTimeInterval.milliseconds(250)
+    private static let reopenQueryBudget = DispatchTimeInterval.milliseconds(75)
 
     static func states(
         for processIdentifiers: [pid_t]
@@ -41,7 +43,15 @@ enum ApplicationWindowService {
         NSWorkspace.shared.openApplication(
             at: bundleURL,
             configuration: configuration,
-            completionHandler: nil
+            completionHandler: { _, error in
+                guard error != nil else {
+                    return
+                }
+
+                Task { @MainActor in
+                    application.activate(options: [.activateAllWindows])
+                }
+            }
         )
     }
 
@@ -55,39 +65,51 @@ enum ApplicationWindowService {
             return [:]
         }
 
-        let deadline = DispatchTime.now() + queryBudget
+        let deadline = DispatchTime.now() + totalQueryBudget
+        let plan = WindowQueryPlan(
+            processIdentifiers: processIdentifiers,
+            visibleWindowCounts: visibleWindowCounts
+        )
         var states: [pid_t: ApplicationWindowState] = [:]
 
-        for processIdentifier in processIdentifiers {
+        for processIdentifier in plan.multipleWindowCandidates {
             guard DispatchTime.now() < deadline else {
                 break
             }
 
-            switch visibleWindowCounts[processIdentifier, default: 0] {
-            case 0:
-                // Only a successful empty AX window list is safe to badge as
-                // reopenable; another Space and query failures stay ordinary.
-                guard let hasWindows = hasWindows(
-                    for: processIdentifier,
-                    deadline: deadline
-                ), !hasWindows else {
-                    continue
-                }
-
-                states[processIdentifier] = .windowless
-            case 1:
+            let windows = windows(
+                for: processIdentifier,
+                deadline: deadline
+            )
+            guard windows.count > 1 else {
                 continue
-            default:
-                let windows = windows(
-                    for: processIdentifier,
-                    deadline: deadline
-                )
-                guard windows.count > 1 else {
-                    continue
-                }
-
-                states[processIdentifier] = .multiple(windows)
             }
+
+            states[processIdentifier] = .multiple(windows)
+        }
+
+        // Window targets are the primary navigation feature. Reopen badges use
+        // only the remaining global budget, capped at one AX timeout interval.
+        let reopenDeadline = min(
+            deadline,
+            DispatchTime.now() + reopenQueryBudget
+        )
+
+        for processIdentifier in plan.reopenCandidates {
+            guard DispatchTime.now() < reopenDeadline else {
+                break
+            }
+
+            // Only a successful empty AX window list is safe to badge as
+            // reopenable; another Space and query failures stay ordinary.
+            guard let hasWindows = hasWindows(
+                for: processIdentifier,
+                deadline: reopenDeadline
+            ), !hasWindows else {
+                continue
+            }
+
+            states[processIdentifier] = .windowless
         }
 
         return states
