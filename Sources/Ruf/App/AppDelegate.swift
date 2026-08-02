@@ -1,5 +1,6 @@
 import AppKit
 import RufCore
+import Sparkle
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
@@ -26,10 +27,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     )
 
-    private lazy var softwareUpdateController = SoftwareUpdateController {
-        [weak self] _ in
-        self?.updateSoftwareUpdateMenuItem()
-    }
+    private lazy var softwareUpdateController = SPUStandardUpdaterController(
+        startingUpdater: false,
+        updaterDelegate: nil,
+        userDriverDelegate: nil
+    )
 
     private var statusItem: NSStatusItem?
     private var softwareUpdateMenuItem: NSMenuItem?
@@ -43,7 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         installStatusItem()
         panelController.prepare(itemCount: 0)
         applySwitcherMode()
-        softwareUpdateController.start()
+        softwareUpdateController.startUpdater()
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
@@ -190,10 +192,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         ).target = self
         let softwareUpdateMenuItem = menu.addItem(
             withTitle: "Check for Updates…",
-            action: #selector(performSoftwareUpdateAction),
+            action: #selector(
+                SPUStandardUpdaterController.checkForUpdates(_:)
+            ),
             keyEquivalent: ""
         )
-        softwareUpdateMenuItem.target = self
+        softwareUpdateMenuItem.target = softwareUpdateController
         let accessibilityMenuItem = menu.addItem(
             withTitle: "Enable Accessibility…",
             action: #selector(enableAccessibility),
@@ -221,24 +225,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func updateSoftwareUpdateMenuItem() {
-        let title = switch softwareUpdateController.state {
-        case .idle:
-            "Check for Updates…"
-        case .checking:
-            "Checking for Updates…"
-        case let .available(version):
-            "Download Ruf \(version)…"
-        case let .downloading(version):
-            "Downloading Ruf \(version)…"
-        case .readyToInstall:
-            "Restart Ruf to Update"
-        case let .installing(version):
-            "Installing Ruf \(version)…"
-        }
-
-        softwareUpdateMenuItem?.title = title
         softwareUpdateMenuItem?.isEnabled =
-            softwareUpdateController.canPerformPrimaryAction
+            softwareUpdateController.updater.canCheckForUpdates
     }
 
     private func updateAccessibilityMenuItem(accessibilityGranted: Bool) {
@@ -353,11 +341,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc
     private func showSettings() {
         settingsWindowController.show()
-    }
-
-    @objc
-    private func performSoftwareUpdateAction() {
-        softwareUpdateController.performPrimaryAction()
     }
 
     @objc
