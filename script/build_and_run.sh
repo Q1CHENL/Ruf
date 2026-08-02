@@ -14,6 +14,8 @@ APP_CONTENTS="$APP_BUNDLE/Contents"
 APP_MACOS="$APP_CONTENTS/MacOS"
 APP_BINARY="$APP_MACOS/$APP_NAME"
 APP_FRAMEWORKS="$APP_CONTENTS/Frameworks"
+APP_RESOURCES="$APP_CONTENTS/Resources"
+APP_ICON_SOURCE="$ROOT_DIR/Resources/AppIcon/$APP_NAME.icon"
 SPARKLE_FRAMEWORK="$APP_FRAMEWORKS/Sparkle.framework"
 SPARKLE_TOOLS="$ROOT_DIR/.build/artifacts/sparkle/Sparkle/bin"
 SPARKLE_KEY_ACCOUNT="$BUNDLE_ID"
@@ -35,6 +37,30 @@ stop_running_app() {
 archive_app() {
     rm -f "$APP_ARCHIVE"
     /usr/bin/ditto -c -k --keepParent "$APP_BUNDLE" "$APP_ARCHIVE"
+}
+
+compile_app_icon() {
+    local generated_info_plist="$APP_CONTENTS/assetcatalog_generated_info.plist"
+    local minimum_system_version
+    minimum_system_version="$(/usr/libexec/PlistBuddy \
+        -c "Print :LSMinimumSystemVersion" \
+        "$APP_CONTENTS/Info.plist")"
+
+    /usr/bin/xcrun actool \
+        --compile "$APP_RESOURCES" \
+        --platform macosx \
+        --minimum-deployment-target "$minimum_system_version" \
+        --app-icon "$APP_NAME" \
+        --output-partial-info-plist "$generated_info_plist" \
+        --output-format human-readable-text \
+        --warnings \
+        --notices \
+        "$APP_ICON_SOURCE"
+
+    /usr/libexec/PlistBuddy \
+        -c "Merge $generated_info_plist" \
+        "$APP_CONTENTS/Info.plist"
+    rm "$generated_info_plist"
 }
 
 generate_appcast() {
@@ -63,12 +89,13 @@ package_app() {
     build_directory="$(swift build "${build_arguments[@]}" --show-bin-path)"
 
     rm -rf "$APP_BUNDLE"
-    mkdir -p "$APP_MACOS" "$APP_FRAMEWORKS"
+    mkdir -p "$APP_MACOS" "$APP_FRAMEWORKS" "$APP_RESOURCES"
     cp "$build_directory/$APP_NAME" "$APP_BINARY"
     /usr/bin/ditto \
         "$build_directory/Sparkle.framework" \
         "$SPARKLE_FRAMEWORK"
     cp "$ROOT_DIR/Resources/Info.plist" "$APP_CONTENTS/Info.plist"
+    compile_app_icon
     chmod +x "$APP_BINARY"
     install_name_tool \
         -add_rpath "@executable_path/../Frameworks" \

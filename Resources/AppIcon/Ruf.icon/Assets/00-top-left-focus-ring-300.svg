@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="1024"
+     height="1024"
+     viewBox="0 0 1024 1024">
+  <path id="top-left-focus-ring-300"
+        fill="#FFFFFF"
+        fill-rule="evenodd"
+        d="M272 135
+           H384
+           A137 137 0 0 1 521 272
+           V384
+           A137 137 0 0 1 384 521
+           H272
+           A137 137 0 0 1 135 384
+           V272
+           A137 137 0 0 1 272 135
+           Z
+           M272 194
+           A78 78 0 0 0 194 272
+           V384
+           A78 78 0 0 0 272 462
+           H384
+           A78 78 0 0 0 462 384
+           V272
+           A78 78 0 0 0 384 194
+           Z"/>
+</svg>
