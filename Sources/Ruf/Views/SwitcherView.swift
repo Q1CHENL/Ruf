@@ -9,6 +9,7 @@ enum SwitcherMetrics {
     static let selectionRingWidth: CGFloat = 3
     static let selectionRingSize = iconPlateSize + 2 * selectionRingWidth
     static let selectionRingCornerRadius = iconCornerRadius + selectionRingWidth
+    static let reopenBadgeSize: CGFloat = 15
     static let horizontalSpacing: CGFloat = 4
     static let verticalSpacing: CGFloat = 4
     static let containerInset: CGFloat = 12
@@ -92,10 +93,27 @@ private struct SwitchTargetCell: View {
                                 )
                         }
                     }
+                    .overlay(alignment: .topTrailing) {
+                        if target.showsReopenBadge {
+                            ZStack {
+                                Circle()
+                                    .fill(Color(nsColor: .systemBlue))
+
+                                Image(systemName: "plus")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundStyle(.white)
+                            }
+                            .frame(
+                                width: SwitcherMetrics.reopenBadgeSize,
+                                height: SwitcherMetrics.reopenBadgeSize
+                            )
+                            .accessibilityHidden(true)
+                        }
+                    }
 
                 SwitchTargetLabel(
                     title: target.title,
-                    isWindowTitle: target.window != nil,
+                    isWindowTitle: target.showsWindowTitle,
                     isSelected: isSelected
                 )
             }

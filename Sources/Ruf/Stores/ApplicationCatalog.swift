@@ -31,19 +31,22 @@ final class ApplicationCatalog: NSObject {
 
     func snapshot() async -> [SwitchTarget] {
         let applications = applicationSnapshot()
-        let windowsByProcessIdentifier = await ApplicationWindowService.multipleWindows(
+        let windowStates = await ApplicationWindowService.states(
             for: applications.map(\.application.processIdentifier)
         )
 
         return applications.flatMap { item -> [SwitchTarget] in
-            guard let windows = windowsByProcessIdentifier[
-                item.application.processIdentifier
-            ] else {
-                return [SwitchTarget(item: item, window: nil)]
-            }
-
-            return windows.map { window in
-                SwitchTarget(item: item, window: window)
+            switch windowStates[item.application.processIdentifier] {
+            case .windowless?:
+                return [
+                    SwitchTarget(item: item, kind: .reopenApplication),
+                ]
+            case let .multiple(windows)?:
+                return windows.map { window in
+                    SwitchTarget(item: item, kind: .window(window))
+                }
+            case nil:
+                return [SwitchTarget(item: item, kind: .application)]
             }
         }
     }

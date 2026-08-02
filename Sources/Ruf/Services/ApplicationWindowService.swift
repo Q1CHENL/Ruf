@@ -6,11 +6,11 @@ enum ApplicationWindowService {
     private static let messageTimeout: Float = 0.075
     private static let queryBudget = DispatchTimeInterval.milliseconds(250)
 
-    static func multipleWindows(
+    static func states(
         for processIdentifiers: [pid_t]
-    ) async -> [pid_t: [ApplicationWindow]] {
+    ) async -> [pid_t: ApplicationWindowState] {
         await Task.detached(priority: .userInitiated) {
-            queryWindows(for: processIdentifiers)
+            queryStates(for: processIdentifiers)
         }.value
     }
 
@@ -28,40 +28,75 @@ enum ApplicationWindowService {
         AXUIElementPerformAction(window.element, kAXRaiseAction as CFString)
     }
 
-    private static func queryWindows(
+    @MainActor
+    static func reopen(_ application: NSRunningApplication) {
+        guard let bundleURL = application.bundleURL else {
+            application.activate(options: [.activateAllWindows])
+            return
+        }
+
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        configuration.addsToRecentItems = false
+        NSWorkspace.shared.openApplication(
+            at: bundleURL,
+            configuration: configuration,
+            completionHandler: nil
+        )
+    }
+
+    private static func queryStates(
         for processIdentifiers: [pid_t]
-    ) -> [pid_t: [ApplicationWindow]] {
-        guard AccessibilityPermission.isGranted else {
+    ) -> [pid_t: ApplicationWindowState] {
+        guard
+            AccessibilityPermission.isGranted,
+            let visibleWindowCounts = visibleWindowCounts()
+        else {
             return [:]
         }
 
-        let candidates = applicationsWithMultipleVisibleWindows()
         let deadline = DispatchTime.now() + queryBudget
-        var windowsByProcessIdentifier: [pid_t: [ApplicationWindow]] = [:]
+        var states: [pid_t: ApplicationWindowState] = [:]
 
-        for processIdentifier in processIdentifiers
-        where candidates.contains(processIdentifier) {
+        for processIdentifier in processIdentifiers {
             guard DispatchTime.now() < deadline else {
                 break
             }
 
-            let windows = windows(
-                for: processIdentifier,
-                deadline: deadline
-            )
-            guard windows.count > 1 else {
-                continue
-            }
+            switch visibleWindowCounts[processIdentifier, default: 0] {
+            case 0:
+                // Only a successful empty AX window list is safe to badge as
+                // reopenable; another Space and query failures stay ordinary.
+                guard let hasWindows = hasWindows(
+                    for: processIdentifier,
+                    deadline: deadline
+                ), !hasWindows else {
+                    continue
+                }
 
-            windowsByProcessIdentifier[processIdentifier] = windows
+                states[processIdentifier] = .windowless
+            case 1:
+                continue
+            default:
+                let windows = windows(
+                    for: processIdentifier,
+                    deadline: deadline
+                )
+                guard windows.count > 1 else {
+                    continue
+                }
+
+                states[processIdentifier] = .multiple(windows)
+            }
         }
 
-        return windowsByProcessIdentifier
+        return states
     }
 
-    private static func applicationsWithMultipleVisibleWindows() -> Set<pid_t> {
-        // AX calls cross process boundaries, so use the fast WindowServer
-        // snapshot to avoid querying every running application.
+    private static func visibleWindowCounts() -> [pid_t: Int]? {
+        // One visible WindowServer window is already an ordinary app target.
+        // AX is only needed to distinguish zero windows from another Space,
+        // or to enumerate apps with multiple visible windows.
         let options: CGWindowListOption = [
             .optionOnScreenOnly,
             .excludeDesktopElements,
@@ -70,10 +105,10 @@ enum ApplicationWindowService {
             options,
             kCGNullWindowID
         ) as? [[String: Any]] else {
-            return []
+            return nil
         }
 
-        let windowCounts = windowInfo.reduce(into: [pid_t: Int]()) { counts, window in
+        return windowInfo.reduce(into: [pid_t: Int]()) { counts, window in
             guard
                 window[kCGWindowLayer as String] as? Int == 0,
                 let processIdentifier = window[kCGWindowOwnerPID as String] as? Int
@@ -83,12 +118,27 @@ enum ApplicationWindowService {
 
             counts[pid_t(processIdentifier), default: 0] += 1
         }
+    }
 
-        return Set(
-            windowCounts.compactMap { processIdentifier, windowCount in
-                windowCount > 1 ? processIdentifier : nil
-            }
-        )
+    private static func hasWindows(
+        for processIdentifier: pid_t,
+        deadline: DispatchTime
+    ) -> Bool? {
+        let applicationElement = AXUIElementCreateApplication(processIdentifier)
+        AXUIElementSetMessagingTimeout(applicationElement, messageTimeout)
+
+        guard
+            let applicationValues = values(
+                of: [kAXWindowsAttribute],
+                from: applicationElement
+            ),
+            DispatchTime.now() < deadline,
+            let elements = applicationValues[0] as? [AXUIElement]
+        else {
+            return nil
+        }
+
+        return !elements.isEmpty
     }
 
     private static func windows(

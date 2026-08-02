@@ -144,13 +144,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
 
-        if let window = target.window {
+        switch target.kind {
+        case .application:
+            target.item.application.activate(options: [.activateAllWindows])
+        case let .window(window):
             ApplicationWindowService.activate(
                 window,
                 in: target.item.application
             )
-        } else {
-            target.item.application.activate(options: [.activateAllWindows])
+        case .reopenApplication:
+            ApplicationWindowService.reopen(target.item.application)
         }
     }
 

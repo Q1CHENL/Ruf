@@ -6,3 +6,8 @@ struct ApplicationWindow: @unchecked Sendable {
     let element: AXUIElement
     let title: String
 }
+
+enum ApplicationWindowState: Sendable {
+    case windowless
+    case multiple([ApplicationWindow])
+}
