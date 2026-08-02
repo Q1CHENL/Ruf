@@ -13,6 +13,11 @@ APP_ARCHIVE="$DIST_DIR/$APP_NAME.zip"
 APP_CONTENTS="$APP_BUNDLE/Contents"
 APP_MACOS="$APP_CONTENTS/MacOS"
 APP_BINARY="$APP_MACOS/$APP_NAME"
+APP_FRAMEWORKS="$APP_CONTENTS/Frameworks"
+SPARKLE_FRAMEWORK="$APP_FRAMEWORKS/Sparkle.framework"
+SPARKLE_TOOLS="$ROOT_DIR/.build/artifacts/sparkle/Sparkle/bin"
+SPARKLE_KEY_ACCOUNT="$BUNDLE_ID"
+REPOSITORY_URL="https://github.com/Q1CHENL/Ruf"
 UNIVERSAL_ARCHS=(--arch arm64 --arch x86_64)
 
 stop_running_app() {
@@ -32,6 +37,20 @@ archive_app() {
     /usr/bin/ditto -c -k --keepParent "$APP_BUNDLE" "$APP_ARCHIVE"
 }
 
+generate_appcast() {
+    local version
+    version="$(/usr/libexec/PlistBuddy \
+        -c "Print :CFBundleShortVersionString" \
+        "$APP_CONTENTS/Info.plist")"
+
+    rm -f "$DIST_DIR/appcast.xml"
+    "$SPARKLE_TOOLS/generate_appcast" \
+        --account "$SPARKLE_KEY_ACCOUNT" \
+        --download-url-prefix "$REPOSITORY_URL/releases/download/v$version/" \
+        --link "$REPOSITORY_URL" \
+        "$DIST_DIR"
+}
+
 package_app() {
     local configuration="$1"
     shift
@@ -40,19 +59,29 @@ package_app() {
 
     swift build "${build_arguments[@]}"
 
-    local build_binary
-    build_binary="$(swift build "${build_arguments[@]}" --show-bin-path)/$APP_NAME"
+    local build_directory
+    build_directory="$(swift build "${build_arguments[@]}" --show-bin-path)"
 
     rm -rf "$APP_BUNDLE"
-    mkdir -p "$APP_MACOS"
-    cp "$build_binary" "$APP_BINARY"
+    mkdir -p "$APP_MACOS" "$APP_FRAMEWORKS"
+    cp "$build_directory/$APP_NAME" "$APP_BINARY"
+    /usr/bin/ditto \
+        "$build_directory/Sparkle.framework" \
+        "$SPARKLE_FRAMEWORK"
     cp "$ROOT_DIR/Resources/Info.plist" "$APP_CONTENTS/Info.plist"
     chmod +x "$APP_BINARY"
+    install_name_tool \
+        -add_rpath "@executable_path/../Frameworks" \
+        "$APP_BINARY"
     xattr -cr "$APP_BUNDLE"
 
     codesign --force --sign - --identifier "$BUNDLE_ID" "$APP_BUNDLE"
     codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
     archive_app
+
+    if [[ "$configuration" == "release" ]]; then
+        generate_appcast
+    fi
 }
 
 open_app() {

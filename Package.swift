@@ -10,11 +10,20 @@ let package = Package(
     products: [
         .executable(name: "Ruf", targets: ["Ruf"]),
     ],
+    dependencies: [
+        .package(
+            url: "https://github.com/sparkle-project/Sparkle",
+            from: "2.9.4"
+        ),
+    ],
     targets: [
         .target(name: "RufCore"),
         .executableTarget(
             name: "Ruf",
-            dependencies: ["RufCore"]
+            dependencies: [
+                "RufCore",
+                .product(name: "Sparkle", package: "Sparkle"),
+            ]
         ),
         .testTarget(
             name: "RufCoreTests",

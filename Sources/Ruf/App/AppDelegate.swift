@@ -26,7 +26,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     )
 
+    private lazy var softwareUpdateController = SoftwareUpdateController {
+        [weak self] _ in
+        self?.updateSoftwareUpdateMenuItem()
+    }
+
     private var statusItem: NSStatusItem?
+    private var softwareUpdateMenuItem: NSMenuItem?
     private var accessibilityMenuItem: NSMenuItem?
     private var permissionMonitor: Timer?
     private var remainingPermissionChecks = 0
@@ -36,6 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let initialApplications = catalog.snapshot()
         panelController.prepare(itemCount: initialApplications.count)
         applySwitcherMode()
+        softwareUpdateController.start()
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
@@ -114,6 +121,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             action: #selector(showSettings),
             keyEquivalent: ","
         ).target = self
+        let softwareUpdateMenuItem = menu.addItem(
+            withTitle: "Check for Updates…",
+            action: #selector(performSoftwareUpdateAction),
+            keyEquivalent: ""
+        )
+        softwareUpdateMenuItem.target = self
         let accessibilityMenuItem = menu.addItem(
             withTitle: "Enable Accessibility…",
             action: #selector(enableAccessibility),
@@ -129,14 +142,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         statusItem.menu = menu
         self.statusItem = statusItem
+        self.softwareUpdateMenuItem = softwareUpdateMenuItem
         self.accessibilityMenuItem = accessibilityMenuItem
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
+        updateSoftwareUpdateMenuItem()
         let accessibilityGranted = preferences.switcherMode == .ruf
             && !keyboardEventTap.isRunning
             && AccessibilityPermission.isGranted
         updateAccessibilityMenuItem(accessibilityGranted: accessibilityGranted)
+    }
+
+    private func updateSoftwareUpdateMenuItem() {
+        let title = switch softwareUpdateController.state {
+        case .idle:
+            "Check for Updates…"
+        case .checking:
+            "Checking for Updates…"
+        case let .available(version):
+            "Download Ruf \(version)…"
+        case let .downloading(version):
+            "Downloading Ruf \(version)…"
+        case .readyToInstall:
+            "Restart Ruf to Update"
+        case let .installing(version):
+            "Installing Ruf \(version)…"
+        }
+
+        softwareUpdateMenuItem?.title = title
+        softwareUpdateMenuItem?.isEnabled =
+            softwareUpdateController.canPerformPrimaryAction
     }
 
     private func updateAccessibilityMenuItem(accessibilityGranted: Bool) {
@@ -251,6 +287,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc
     private func showSettings() {
         settingsWindowController.show()
+    }
+
+    @objc
+    private func performSoftwareUpdateAction() {
+        softwareUpdateController.performPrimaryAction()
     }
 
     @objc

@@ -26,5 +26,17 @@
     <true/>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
+    <key>SUAllowsAutomaticUpdates</key>
+    <false/>
+    <key>SUAutomaticallyUpdate</key>
+    <false/>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
+    <key>SUFeedURL</key>
+    <string>https://github.com/Q1CHENL/Ruf/releases/latest/download/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>Fa07EXz2jK/kPcbw4Rjg8Y4FjNv5zNKA+LCeKlahX1c=</string>
+    <key>SUVerifyUpdateBeforeExtraction</key>
+    <true/>
 </dict>
 </plist>
