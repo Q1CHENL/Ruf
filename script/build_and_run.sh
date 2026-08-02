@@ -13,6 +13,7 @@ APP_ARCHIVE="$DIST_DIR/$APP_NAME.zip"
 APP_CONTENTS="$APP_BUNDLE/Contents"
 APP_MACOS="$APP_CONTENTS/MacOS"
 APP_BINARY="$APP_MACOS/$APP_NAME"
+UNIVERSAL_ARCHS=(--arch arm64 --arch x86_64)
 
 stop_running_app() {
     local pid
@@ -26,13 +27,21 @@ stop_running_app() {
     done < <(pgrep -x "$APP_NAME" || true)
 }
 
+archive_app() {
+    rm -f "$APP_ARCHIVE"
+    /usr/bin/ditto -c -k --keepParent "$APP_BUNDLE" "$APP_ARCHIVE"
+}
+
 package_app() {
     local configuration="$1"
+    shift
 
-    swift build -c "$configuration"
+    local build_arguments=(-c "$configuration" "$@")
+
+    swift build "${build_arguments[@]}"
 
     local build_binary
-    build_binary="$(swift build -c "$configuration" --show-bin-path)/$APP_NAME"
+    build_binary="$(swift build "${build_arguments[@]}" --show-bin-path)/$APP_NAME"
 
     rm -rf "$APP_BUNDLE"
     mkdir -p "$APP_MACOS"
@@ -40,15 +49,10 @@ package_app() {
     cp "$ROOT_DIR/Resources/Info.plist" "$APP_CONTENTS/Info.plist"
     chmod +x "$APP_BINARY"
     xattr -cr "$APP_BUNDLE"
-    codesign --force --sign - --identifier "$BUNDLE_ID" "$APP_BUNDLE"
-    xattr -cr "$APP_BUNDLE"
-    codesign --verify --deep --strict "$APP_BUNDLE"
 
-    rm -f "$APP_ARCHIVE"
-    (
-        cd "$DIST_DIR"
-        COPYFILE_DISABLE=1 /usr/bin/zip -X -qry "$APP_ARCHIVE" "$APP_NAME.app"
-    )
+    codesign --force --sign - --identifier "$BUNDLE_ID" "$APP_BUNDLE"
+    codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
+    archive_app
 }
 
 open_app() {
@@ -67,7 +71,7 @@ launch_debug_app() {
 
 case "$MODE" in
     package)
-        package_app release
+        package_app release "${UNIVERSAL_ARCHS[@]}"
         ;;
     run)
         launch_debug_app

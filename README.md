@@ -17,6 +17,6 @@ swift test
 ./script/build_and_run.sh
 ```
 
-To create an optimized release build without launching Ruf, run
+To create an optimized universal release build without launching Ruf, run
 `./script/build_and_run.sh --package`. The app and archive are written to
 `dist/Ruf.app` and `dist/Ruf.zip`.
