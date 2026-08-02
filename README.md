@@ -2,6 +2,8 @@
 
 A simple macOS app switcher with a matrix-style layout.
 
+![Ruf screenshot](.github/assets/screenshot.png)
+
 ## Requirements
 
 - macOS 26 or later
