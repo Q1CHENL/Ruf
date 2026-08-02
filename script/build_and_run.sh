@@ -9,7 +9,7 @@ BUNDLE_ID="com.qichen.ruf"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="$ROOT_DIR/dist"
 APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
-APP_ARCHIVE="$DIST_DIR/$APP_NAME.zip"
+APP_DISK_IMAGE="$DIST_DIR/$APP_NAME.dmg"
 APP_CONTENTS="$APP_BUNDLE/Contents"
 APP_MACOS="$APP_CONTENTS/MacOS"
 APP_BINARY="$APP_MACOS/$APP_NAME"
@@ -34,9 +34,26 @@ stop_running_app() {
     done < <(pgrep -x "$APP_NAME" || true)
 }
 
-archive_app() {
-    rm -f "$APP_ARCHIVE"
-    /usr/bin/ditto -c -k --norsrc --keepParent "$APP_BUNDLE" "$APP_ARCHIVE"
+create_disk_image() {
+    local staging_directory
+    staging_directory="$(mktemp -d)"
+
+    (
+        trap 'rm -rf "$staging_directory"' EXIT
+
+        /usr/bin/ditto \
+            --norsrc \
+            "$APP_BUNDLE" \
+            "$staging_directory/$APP_NAME.app"
+        ln -s /Applications "$staging_directory/Applications"
+
+        rm -f "$APP_DISK_IMAGE" "$DIST_DIR/$APP_NAME.zip"
+        /usr/sbin/diskutil image create from \
+            --format UDZO \
+            --volumeName "$APP_NAME" \
+            "$staging_directory" \
+            "$APP_DISK_IMAGE"
+    )
 }
 
 compile_app_icon() {
@@ -104,7 +121,7 @@ package_app() {
 
     codesign --force --sign - --identifier "$BUNDLE_ID" "$APP_BUNDLE"
     codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
-    archive_app
+    create_disk_image
 
     if [[ "$configuration" == "release" ]]; then
         generate_appcast

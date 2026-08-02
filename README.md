@@ -18,6 +18,6 @@ swift test
 ```
 
 To create an optimized universal release build without launching Ruf, run
-`./script/build_and_run.sh --package`. The app, update archive, and Sparkle
-appcast are written to `dist/Ruf.app`, `dist/Ruf.zip`, and
+`./script/build_and_run.sh --package`. The app, disk image, and Sparkle appcast
+are written to `dist/Ruf.app`, `dist/Ruf.dmg`, and
 `dist/appcast.xml`.
