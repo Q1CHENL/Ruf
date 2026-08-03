@@ -28,4 +28,20 @@ final class AppPreferencesTests: XCTestCase {
         XCTAssertEqual(reloadedPreferences.switcherMode, .system)
     }
 
+    @MainActor
+    func testLaunchAtLoginIsEnabledByDefaultOnlyUntilConfigured() {
+        let suiteName = "AppPreferencesTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let preferences = AppPreferences(defaults: defaults)
+
+        XCTAssertTrue(preferences.shouldEnableLaunchAtLoginByDefault)
+
+        preferences.markLaunchAtLoginConfigured()
+
+        let reloadedPreferences = AppPreferences(defaults: defaults)
+
+        XCTAssertFalse(reloadedPreferences.shouldEnableLaunchAtLoginByDefault)
+    }
 }

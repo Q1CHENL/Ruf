@@ -10,6 +10,7 @@ public enum AppSwitcherMode: String, Sendable {
 @Observable
 public final class AppPreferences {
     private enum Key {
+        static let launchAtLoginConfigured = "launchAtLoginConfigured"
         static let switcherMode = "switcherMode"
     }
 
@@ -29,9 +30,17 @@ public final class AppPreferences {
         self.init(defaults: .standard)
     }
 
+    public var shouldEnableLaunchAtLoginByDefault: Bool {
+        !defaults.bool(forKey: Key.launchAtLoginConfigured)
+    }
+
     public init(defaults: UserDefaults) {
         self.defaults = defaults
         switcherMode = defaults.string(forKey: Key.switcherMode)
             .flatMap(AppSwitcherMode.init(rawValue:)) ?? .ruf
+    }
+
+    public func markLaunchAtLoginConfigured() {
+        defaults.set(true, forKey: Key.launchAtLoginConfigured)
     }
 }

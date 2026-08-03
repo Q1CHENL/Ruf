@@ -1,5 +1,6 @@
 import AppKit
 import RufCore
+import ServiceManagement
 import Sparkle
 
 @MainActor
@@ -42,6 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var pendingActions: [SwitcherAction] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        enableLaunchAtLoginByDefaultIfNeeded()
         installStatusItem()
         panelController.prepare(itemCount: 0)
         applySwitcherMode()
@@ -336,6 +338,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func switcherModeDidChange() {
         applySwitcherMode()
+    }
+
+    private func enableLaunchAtLoginByDefaultIfNeeded() {
+        guard preferences.shouldEnableLaunchAtLoginByDefault else {
+            return
+        }
+
+        let service = SMAppService.mainApp
+
+        switch service.status {
+        case .enabled, .requiresApproval:
+            preferences.markLaunchAtLoginConfigured()
+        case .notRegistered:
+            do {
+                try service.register()
+                preferences.markLaunchAtLoginConfigured()
+            } catch {
+                return
+            }
+        case .notFound:
+            return
+        @unknown default:
+            return
+        }
     }
 
     @objc
