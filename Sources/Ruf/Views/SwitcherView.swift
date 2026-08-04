@@ -84,7 +84,7 @@ private struct SwitchTargetCell: View {
                                 style: .continuous
                             )
                                 .strokeBorder(
-                                    .black.opacity(0.55),
+                                    Color.primary.opacity(0.55),
                                     lineWidth: SwitcherMetrics.selectionRingWidth
                                 )
                                 .frame(
