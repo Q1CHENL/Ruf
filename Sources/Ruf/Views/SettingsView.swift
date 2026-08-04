@@ -9,39 +9,84 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
-            Section {
-                Picker(selection: $preferences.switcherMode) {
+            Section("General") {
+                Picker("Command-Tab", selection: $preferences.switcherMode) {
                     Text("Ruf")
                         .tag(AppSwitcherMode.ruf)
                     Text("macOS")
                         .tag(AppSwitcherMode.system)
-                } label: {
-                    HStack(spacing: 0) {
-                        Image(systemName: "command")
-                        Image(systemName: "arrow.right.to.line.compact")
-                    }
-                    .accessibilityLabel("Command-Tab")
                 }
                 .pickerStyle(.radioGroup)
-            }
 
-            Section {
-                LabeledContent("Move current window") {
-                    Text("⌃⌥⌘ + ← ↑ ↓ →")
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Section {
                 LaunchAtLoginSetting(
                     onUserChange: preferences.markLaunchAtLoginConfigured
                 )
             }
+
+            Section {
+                ShortcutRow(
+                    "Switch applications",
+                    keys: "⌘Tab / ⇧⌘Tab"
+                )
+
+                Group {
+                    ShortcutRow(
+                        "Navigate selection",
+                        keys: "⌘ + ← ↑ ↓ →"
+                    )
+                    ShortcutRow(
+                        "Open new window for selected app",
+                        keys: "⌘N"
+                    )
+                    ShortcutRow(
+                        "Quit selected app",
+                        keys: "⌘Q"
+                    )
+                }
+                .opacity(preferences.switcherMode == .ruf ? 1 : 0.45)
+
+                ShortcutRow(
+                    "Move current window between displays",
+                    keys: "⌃⌥⌘ + ← ↑ ↓ →"
+                )
+            } header: {
+                Text("Keyboard Shortcuts")
+            } footer: {
+                if preferences.switcherMode == .ruf {
+                    Text(
+                        "New Window and Quit act on the selected app after "
+                            + "all shortcut keys are released."
+                    )
+                } else {
+                    Text(
+                        "Switcher navigation, New Window, and Quit require "
+                            + "Command-Tab to use Ruf."
+                    )
+                }
+            }
         }
         .formStyle(.grouped)
-        .frame(width: 440, height: 240)
+        .frame(width: 480, height: 400)
         .onChange(of: preferences.switcherMode) {
             onSwitcherModeChanged()
+        }
+    }
+}
+
+private struct ShortcutRow: View {
+    let title: String
+    let keys: String
+
+    init(_ title: String, keys: String) {
+        self.title = title
+        self.keys = keys
+    }
+
+    var body: some View {
+        LabeledContent(title) {
+            Text(keys)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
         }
     }
 }
