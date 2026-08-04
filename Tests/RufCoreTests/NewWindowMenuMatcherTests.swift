@@ -124,3 +124,32 @@ final class NewWindowMenuItemMatcherTests: XCTestCase {
         )
     }
 }
+
+final class NewWindowMenuSearchDecisionTests: XCTestCase {
+    func testRetriesOnlyIncompleteSearchesWhileTimeRemains() {
+        XCTAssertTrue(
+            NewWindowMenuSearchDecision.shouldRetry(
+                after: .incomplete,
+                hasTimeRemaining: true
+            )
+        )
+        XCTAssertFalse(
+            NewWindowMenuSearchDecision.shouldRetry(
+                after: .incomplete,
+                hasTimeRemaining: false
+            )
+        )
+        XCTAssertFalse(
+            NewWindowMenuSearchDecision.shouldRetry(
+                after: .actionRequested,
+                hasTimeRemaining: true
+            )
+        )
+        XCTAssertFalse(
+            NewWindowMenuSearchDecision.shouldRetry(
+                after: .noMatch,
+                hasTimeRemaining: true
+            )
+        )
+    }
+}

@@ -5,7 +5,7 @@ import RufCore
 
 enum ApplicationWindowService {
     enum NewWindowOpenResult: Sendable {
-        case menuActionPerformed
+        case menuActionRequested
         case unavailable
     }
 
@@ -14,10 +14,20 @@ enum ApplicationWindowService {
         let isInsideNewWindowSubmenu: Bool
     }
 
+    private enum MenuBarQueryResult {
+        case found(AXUIElement)
+        case incomplete
+        case noMatch
+    }
+
     private static let messageTimeout: Float = 0.075
     private static let totalQueryBudget = DispatchTimeInterval.milliseconds(250)
     private static let reopenQueryBudget = DispatchTimeInterval.milliseconds(75)
-    private static let menuQueryBudget = DispatchTimeInterval.milliseconds(500)
+    // AX has no menu-tree-ready notification. Incomplete reads are polled
+    // within this bounded interaction budget; complete searches return early.
+    private static let menuMessageTimeout: Float = 0.2
+    private static let menuQueryBudget = DispatchTimeInterval.milliseconds(1_500)
+    private static let menuRetryInterval: Duration = .milliseconds(20)
     private static let maximumMenuElementCount = 5_000
 
     static func states(
@@ -71,35 +81,91 @@ enum ApplicationWindowService {
     static func openNewWindow(
         in application: NSRunningApplication
     ) async -> NewWindowOpenResult {
-        guard await ApplicationActivation.transferTo(application) else {
+        guard await ApplicationActivation.activate(application) else {
             return .unavailable
         }
 
         let processIdentifier = application.processIdentifier
 
         return await Task.detached(priority: .userInitiated) {
-            pressNewWindowMenuItem(for: processIdentifier)
+            await pressNewWindowMenuItem(for: processIdentifier)
         }.value
     }
 
     private static func pressNewWindowMenuItem(
         for processIdentifier: pid_t
-    ) -> NewWindowOpenResult {
+    ) async -> NewWindowOpenResult {
         guard AccessibilityPermission.isGranted else {
             return .unavailable
         }
 
         let applicationElement = AXUIElementCreateApplication(processIdentifier)
-        AXUIElementSetMessagingTimeout(applicationElement, messageTimeout)
+        AXUIElementSetMessagingTimeout(applicationElement, menuMessageTimeout)
+        let deadline = DispatchTime.now() + menuQueryBudget
 
+        while !Task.isCancelled {
+            let outcome: NewWindowMenuSearchOutcome
+            switch menuBar(from: applicationElement) {
+            case let .found(menuBar):
+                outcome = searchNewWindowMenuItem(
+                    in: menuBar,
+                    deadline: deadline
+                )
+            case .incomplete:
+                outcome = .incomplete
+            case .noMatch:
+                outcome = .noMatch
+            }
+
+            switch outcome {
+            case .actionRequested:
+                return .menuActionRequested
+            case .noMatch:
+                return .unavailable
+            case .incomplete:
+                guard NewWindowMenuSearchDecision.shouldRetry(
+                    after: outcome,
+                    hasTimeRemaining: DispatchTime.now() < deadline
+                ) else {
+                    return .unavailable
+                }
+
+                do {
+                    try await Task.sleep(for: menuRetryInterval)
+                } catch {
+                    return .unavailable
+                }
+            }
+        }
+
+        return .unavailable
+    }
+
+    private static func menuBar(
+        from applicationElement: AXUIElement
+    ) -> MenuBarQueryResult {
         guard let applicationValues = values(
             of: [kAXMenuBarAttribute],
             from: applicationElement
-        ), let menuBar: AXUIElement = decoded(applicationValues[0]) else {
-            return .unavailable
+        ) else {
+            return .incomplete
         }
 
-        let deadline = DispatchTime.now() + menuQueryBudget
+        if let menuBar: AXUIElement = decoded(applicationValues[0]) {
+            return .found(menuBar)
+        }
+
+        if decodedAXError(applicationValues[0]) == .attributeUnsupported {
+            return .noMatch
+        }
+
+        return .incomplete
+    }
+
+    private static func searchNewWindowMenuItem(
+        in menuBar: AXUIElement,
+        deadline: DispatchTime
+    ) -> NewWindowMenuSearchOutcome {
         var elements = [
             MenuTraversalEntry(
                 element: menuBar,
@@ -107,13 +173,17 @@ enum ApplicationWindowService {
             ),
         ]
         var index = 0
+        var wasIncomplete = false
 
-        while index < elements.count,
-              DispatchTime.now() < deadline {
+        while index < elements.count {
+            guard DispatchTime.now() < deadline else {
+                return .incomplete
+            }
+
             let entry = elements[index]
             let element = entry.element
             index += 1
-            AXUIElementSetMessagingTimeout(element, messageTimeout)
+            AXUIElementSetMessagingTimeout(element, menuMessageTimeout)
 
             guard let menuValues = values(
                 of: [
@@ -121,29 +191,60 @@ enum ApplicationWindowService {
                     kAXTitleAttribute,
                     kAXEnabledAttribute,
                     kAXChildrenAttribute,
-                    kAXMenuItemCmdCharAttribute,
-                    kAXMenuItemCmdModifiersAttribute,
                 ],
                 from: element
             ) else {
+                wasIncomplete = true
                 continue
+            }
+
+            if containsTransientAXError(menuValues) {
+                wasIncomplete = true
             }
 
             let role: String? = decoded(menuValues[0])
             let title: String? = decoded(menuValues[1])
             let isEnabled: Bool = decoded(menuValues[2]) ?? false
             guard let children = menuChildren(from: menuValues[3]) else {
+                wasIncomplete = true
                 continue
             }
 
-            let commandCharacter: String? = decoded(menuValues[4])
-            let commandModifierNumber: NSNumber? = decoded(menuValues[5])
             let isMenuItem = role == kAXMenuItemRole
             let hasChildren = !children.isEmpty
             let entersNewWindowSubmenu = isMenuItem
                 && isEnabled
                 && hasChildren
                 && title.map(NewWindowMenuTitleMatcher.matches) == true
+
+            var commandCharacter: String?
+            var commandModifiers: UInt32?
+            let requiresShortcutMatch = isMenuItem
+                && isEnabled
+                && !hasChildren
+                && entry.isInsideNewWindowSubmenu
+                && title.map(NewWindowMenuTitleMatcher.matches) != true
+
+            if requiresShortcutMatch {
+                guard let commandValues = values(
+                    of: [
+                        kAXMenuItemCmdCharAttribute,
+                        kAXMenuItemCmdModifiersAttribute,
+                    ],
+                    from: element
+                ) else {
+                    wasIncomplete = true
+                    continue
+                }
+
+                if containsTransientAXError(commandValues) {
+                    wasIncomplete = true
+                }
+
+                commandCharacter = decoded(commandValues[0])
+                let modifierNumber: NSNumber? = decoded(commandValues[1])
+                commandModifiers = modifierNumber?.uint32Value
+            }
 
             if isMenuItem,
                NewWindowMenuItemMatcher.shouldPress(
@@ -152,18 +253,21 @@ enum ApplicationWindowService {
                    hasChildren: hasChildren,
                    isInsideNewWindowSubmenu: entry.isInsideNewWindowSubmenu,
                    commandCharacter: commandCharacter,
-                   commandModifiers: commandModifierNumber?.uint32Value
-               ),
-               AXUIElementPerformAction(
-                   element,
-                   kAXPressAction as CFString
-               ) == .success {
-                return .menuActionPerformed
+                   commandModifiers: commandModifiers
+               ) {
+                _ = AXUIElementPerformAction(
+                    element,
+                    kAXPressAction as CFString
+                )
+                return .actionRequested
             }
 
             let isInsideNewWindowSubmenu = entry.isInsideNewWindowSubmenu
                 || entersNewWindowSubmenu
             let remainingCapacity = maximumMenuElementCount - elements.count
+            if children.count > remainingCapacity {
+                wasIncomplete = true
+            }
             for child in children.prefix(remainingCapacity) {
                 elements.append(
                     MenuTraversalEntry(
@@ -174,7 +278,7 @@ enum ApplicationWindowService {
             }
         }
 
-        return .unavailable
+        return wasIncomplete ? .incomplete : .noMatch
     }
 
     private static func queryStates(
@@ -439,5 +543,20 @@ enum ApplicationWindowService {
         }
 
         return error
+    }
+
+    private static func containsTransientAXError(_ values: [Any]) -> Bool {
+        values.contains { value in
+            guard let error = decodedAXError(value) else {
+                return false
+            }
+
+            switch error {
+            case .attributeUnsupported, .noValue:
+                return false
+            default:
+                return true
+            }
+        }
     }
 }

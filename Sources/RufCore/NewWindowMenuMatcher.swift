@@ -49,3 +49,18 @@ public enum NewWindowMenuItemMatcher {
         return normalizedMenuText(commandCharacter) == "n"
     }
 }
+
+public enum NewWindowMenuSearchOutcome: Equatable, Sendable {
+    case actionRequested
+    case incomplete
+    case noMatch
+}
+
+public enum NewWindowMenuSearchDecision {
+    public static func shouldRetry(
+        after outcome: NewWindowMenuSearchOutcome,
+        hasTimeRemaining: Bool
+    ) -> Bool {
+        outcome == .incomplete && hasTimeRemaining
+    }
+}

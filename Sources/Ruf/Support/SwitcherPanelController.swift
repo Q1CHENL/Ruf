@@ -87,7 +87,6 @@ final class SwitcherPanelController {
         }
 
         panel.makeKeyAndOrderFront(nil)
-        NSApp.activate()
 
         DispatchQueue.main.async { [weak self] in
             guard let self, self.panel.isVisible, !self.panel.isKeyWindow else {

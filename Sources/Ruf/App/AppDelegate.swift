@@ -185,18 +185,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func openNewWindow() {
+        guard let target = takeSelection() else {
+            return
+        }
+
         Task { @MainActor in
-            guard await ApplicationActivation.waitUntilCurrentApplicationIsActive()
-            else {
-                cancelSwitcher()
-                NSSound.beep()
-                return
-            }
-
-            guard let target = takeSelection() else {
-                return
-            }
-
             let application = target.item.application
             let shouldReopen: Bool
             if case .reopenApplication = target.kind {
