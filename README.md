@@ -1,8 +1,20 @@
 # Ruf
 
-A simple macOS app switcher with a matrix-style layout.
+A lightweight macOS app and window switcher with a matrix layout and
+keyboard-first window controls.
 
-![Ruf screenshot](.github/assets/screenshot.png)
+![Ruf showing applications and windows in its matrix switcher](.github/assets/screenshot.jpg)
+
+## Features
+
+- Switch between applications and individual windows in a compact, spatial
+  matrix ordered by recent use.
+- Open a new window when the selected app exposes a compatible menu command,
+  or quit the selected app without activating it first.
+- Smoothly move the focused non-full-screen window to the spatially adjacent
+  display while preserving its size and relative position.
+
+> Open Ruf Settings for the complete keyboard shortcut reference.
 
 ## Requirements
 
