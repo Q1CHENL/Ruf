@@ -104,6 +104,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         case let .move(move):
             model.move(move)
+        case .openNewWindow:
+            openNewWindow()
         case .commit:
             commitSelection()
         case .cancel:
@@ -154,10 +156,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func commitSelection() {
         keyboardEventTap.resetInputSession()
-        let target = model.finish()
-        panelController.hide()
-
-        guard let target else {
+        guard let target = takeSelection() else {
             return
         }
 
@@ -172,6 +171,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .reopenApplication:
             ApplicationWindowService.reopen(target.item.application)
         }
+    }
+
+    private func openNewWindow() {
+        guard let target = takeSelection() else {
+            return
+        }
+
+        let application = target.item.application
+        let shouldReopen: Bool
+        if case .reopenApplication = target.kind {
+            shouldReopen = true
+        } else {
+            shouldReopen = false
+        }
+
+        Task { @MainActor in
+            guard case .unavailable = await ApplicationWindowService.openNewWindow(
+                in: application
+            ) else {
+                return
+            }
+
+            if shouldReopen {
+                ApplicationWindowService.reopen(application)
+            } else {
+                NSSound.beep()
+            }
+        }
+    }
+
+    private func takeSelection() -> SwitchTarget? {
+        let target = model.finish()
+        panelController.hide()
+        return target
     }
 
     private func cancelSwitcher() {

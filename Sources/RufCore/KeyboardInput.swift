@@ -18,6 +18,7 @@ public struct KeyboardModifiers: OptionSet, Sendable {
 }
 
 public enum KeyboardKeyCode {
+    public static let ansiN: Int64 = 45
     public static let tab: Int64 = 48
     public static let returnKey: Int64 = 36
     public static let keypadEnter: Int64 = 76
@@ -33,23 +34,27 @@ public struct KeyboardInput: Sendable {
     public let keyCode: Int64
     public let modifiers: KeyboardModifiers
     public let isRepeat: Bool
+    public let characters: String?
 
     public init(
         kind: KeyboardEventKind,
         keyCode: Int64,
         modifiers: KeyboardModifiers,
-        isRepeat: Bool
+        isRepeat: Bool,
+        characters: String? = nil
     ) {
         self.kind = kind
         self.keyCode = keyCode
         self.modifiers = modifiers
         self.isRepeat = isRepeat
+        self.characters = characters
     }
 }
 
 public enum SwitcherAction: Equatable, Sendable {
     case cycle(backwards: Bool)
     case move(GridMove)
+    case openNewWindow
     case commit
     case cancel
 }
@@ -70,7 +75,13 @@ public struct KeyboardDecision: Equatable, Sendable {
 }
 
 public struct KeyboardInputSession: Sendable {
+    private struct PendingNewWindowGesture: Sendable {
+        let triggerKeyCode: Int64
+        var isTriggerKeyDown: Bool
+    }
+
     public private(set) var isCycling = false
+    private var pendingNewWindowGesture: PendingNewWindowGesture?
 
     public init() {}
 
@@ -78,21 +89,43 @@ public struct KeyboardInputSession: Sendable {
         _ input: KeyboardInput,
         capturesCommandTab: Bool
     ) -> KeyboardDecision {
+        if let pendingNewWindowGesture {
+            let decision = continueNewWindowGesture(
+                pendingNewWindowGesture,
+                with: input
+            )
+            updateSession(for: decision)
+            return decision
+        }
+
+        if startsNewWindowGesture(with: input) {
+            pendingNewWindowGesture = PendingNewWindowGesture(
+                triggerKeyCode: input.keyCode,
+                isTriggerKeyDown: true
+            )
+            return KeyboardDecision(command: nil, isConsumed: true)
+        }
+
         let decision = decision(
             for: input,
             capturesCommandTab: capturesCommandTab
         )
 
+        updateSession(for: decision)
+        return decision
+    }
+
+    private mutating func updateSession(for decision: KeyboardDecision) {
         switch decision.command {
         case .switcher(.cycle):
             isCycling = true
-        case .switcher(.commit), .switcher(.cancel):
+        case .switcher(.openNewWindow),
+             .switcher(.commit),
+             .switcher(.cancel):
             reset()
         case .switcher(.move), .moveFocusedWindow, nil:
             break
         }
-
-        return decision
     }
 
     public mutating func interrupt() -> KeyboardCommand? {
@@ -106,6 +139,42 @@ public struct KeyboardInputSession: Sendable {
 
     public mutating func reset() {
         isCycling = false
+        pendingNewWindowGesture = nil
+    }
+
+    private func startsNewWindowGesture(
+        with input: KeyboardInput
+    ) -> Bool {
+        isCycling
+            && input.kind == .keyDown
+            && !input.isRepeat
+            && input.modifiers == [.command]
+            && (input.keyCode == KeyboardKeyCode.ansiN
+                || input.characters?.lowercased() == "n")
+    }
+
+    private mutating func continueNewWindowGesture(
+        _ pendingGesture: PendingNewWindowGesture,
+        with input: KeyboardInput
+    ) -> KeyboardDecision {
+        var gesture = pendingGesture
+
+        if input.kind == .keyUp,
+           input.keyCode == gesture.triggerKeyCode {
+            gesture.isTriggerKeyDown = false
+        }
+
+        let isCommandDown = input.modifiers.contains(.command)
+        let isComplete = !gesture.isTriggerKeyDown
+            && !isCommandDown
+        pendingNewWindowGesture = isComplete ? nil : gesture
+
+        return KeyboardDecision(
+            command: isComplete
+                ? .switcher(.openNewWindow)
+                : nil,
+            isConsumed: input.kind != .flagsChanged
+        )
     }
 
     private func decision(

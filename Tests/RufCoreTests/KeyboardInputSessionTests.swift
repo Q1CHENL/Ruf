@@ -2,6 +2,8 @@ import XCTest
 @testable import RufCore
 
 final class KeyboardInputSessionTests: XCTestCase {
+    private let newWindowKeyCode: Int64 = 99
+
     func testCommandTabStartsForwardOrBackwardCycling() {
         var forwardSession = KeyboardInputSession()
         var backwardSession = KeyboardInputSession()
@@ -31,12 +33,7 @@ final class KeyboardInputSessionTests: XCTestCase {
         var session = cyclingSession()
 
         let decision = session.interpret(
-            KeyboardInput(
-                kind: .flagsChanged,
-                keyCode: 55,
-                modifiers: [],
-                isRepeat: false
-            ),
+            commandReleaseInput(),
             capturesCommandTab: true
         )
 
@@ -92,6 +89,214 @@ final class KeyboardInputSessionTests: XCTestCase {
             )
             XCTAssertFalse(session.isCycling)
         }
+    }
+
+    func testNewWindowGestureCompletesAfterNThenCommandAreReleased() {
+        var session = cyclingSession()
+
+        let keyDown = session.interpret(
+            commandNInput(),
+            capturesCommandTab: true
+        )
+
+        XCTAssertEqual(
+            keyDown,
+            KeyboardDecision(command: nil, isConsumed: true)
+        )
+        XCTAssertTrue(session.isCycling)
+
+        let repeated = session.interpret(
+            commandNInput(isRepeat: true),
+            capturesCommandTab: true
+        )
+        XCTAssertEqual(
+            repeated,
+            KeyboardDecision(command: nil, isConsumed: true)
+        )
+
+        let nRelease = session.interpret(
+            KeyboardInput(
+                kind: .keyUp,
+                keyCode: newWindowKeyCode,
+                modifiers: [.command],
+                isRepeat: false
+            ),
+            capturesCommandTab: true
+        )
+        XCTAssertEqual(
+            nRelease,
+            KeyboardDecision(command: nil, isConsumed: true)
+        )
+        XCTAssertTrue(session.isCycling)
+
+        let commandRelease = session.interpret(
+            commandReleaseInput(),
+            capturesCommandTab: true
+        )
+        XCTAssertEqual(
+            commandRelease,
+            switcherDecision(.openNewWindow, isConsumed: false)
+        )
+        XCTAssertFalse(session.isCycling)
+    }
+
+    func testNewWindowGestureCompletesAfterCommandThenNAreReleased() {
+        var session = cyclingSession()
+        _ = session.interpret(commandNInput(), capturesCommandTab: true)
+
+        let commandRelease = session.interpret(
+            commandReleaseInput(),
+            capturesCommandTab: true
+        )
+        XCTAssertEqual(
+            commandRelease,
+            KeyboardDecision(command: nil, isConsumed: false)
+        )
+        XCTAssertTrue(session.isCycling)
+
+        let repeated = session.interpret(
+            KeyboardInput(
+                kind: .keyDown,
+                keyCode: newWindowKeyCode,
+                modifiers: [],
+                isRepeat: true,
+                characters: "n"
+            ),
+            capturesCommandTab: true
+        )
+        XCTAssertEqual(
+            repeated,
+            KeyboardDecision(command: nil, isConsumed: true)
+        )
+
+        let nRelease = session.interpret(
+            KeyboardInput(
+                kind: .keyUp,
+                keyCode: newWindowKeyCode,
+                modifiers: [],
+                isRepeat: false
+            ),
+            capturesCommandTab: true
+        )
+        XCTAssertEqual(nRelease, switcherDecision(.openNewWindow))
+        XCTAssertFalse(session.isCycling)
+
+        let nextCommandN = session.interpret(
+            commandNInput(),
+            capturesCommandTab: true
+        )
+        XCTAssertEqual(
+            nextCommandN,
+            KeyboardDecision(command: nil, isConsumed: false)
+        )
+    }
+
+    func testNewWindowGestureRecognizesThePhysicalNKeyOnNonLatinLayouts() {
+        var session = cyclingSession()
+
+        let keyDown = session.interpret(
+            KeyboardInput(
+                kind: .keyDown,
+                keyCode: KeyboardKeyCode.ansiN,
+                modifiers: [.command],
+                isRepeat: false,
+                characters: "т"
+            ),
+            capturesCommandTab: true
+        )
+        XCTAssertEqual(
+            keyDown,
+            KeyboardDecision(command: nil, isConsumed: true)
+        )
+
+        _ = session.interpret(
+            KeyboardInput(
+                kind: .keyUp,
+                keyCode: KeyboardKeyCode.ansiN,
+                modifiers: [.command],
+                isRepeat: false
+            ),
+            capturesCommandTab: true
+        )
+        let commandRelease = session.interpret(
+            commandReleaseInput(),
+            capturesCommandTab: true
+        )
+
+        XCTAssertEqual(
+            commandRelease,
+            switcherDecision(.openNewWindow, isConsumed: false)
+        )
+    }
+
+    func testPendingNewWindowGestureSurvivesModifierChangesWhileCommandIsHeld() {
+        var session = cyclingSession()
+        _ = session.interpret(commandNInput(), capturesCommandTab: true)
+
+        let capsLockChange = session.interpret(
+            KeyboardInput(
+                kind: .flagsChanged,
+                keyCode: 57,
+                modifiers: [.command],
+                isRepeat: false
+            ),
+            capturesCommandTab: true
+        )
+        XCTAssertEqual(
+            capsLockChange,
+            KeyboardDecision(command: nil, isConsumed: false)
+        )
+
+        _ = session.interpret(
+            KeyboardInput(
+                kind: .keyUp,
+                keyCode: newWindowKeyCode,
+                modifiers: [.command],
+                isRepeat: false
+            ),
+            capturesCommandTab: true
+        )
+        let commandRelease = session.interpret(
+            commandReleaseInput(),
+            capturesCommandTab: true
+        )
+
+        XCTAssertEqual(
+            commandRelease,
+            switcherDecision(.openNewWindow, isConsumed: false)
+        )
+    }
+
+    func testNewWindowActionRequiresCommandNWithoutExtraModifiers() {
+        var session = cyclingSession()
+
+        let decision = session.interpret(
+            KeyboardInput(
+                kind: .keyDown,
+                keyCode: newWindowKeyCode,
+                modifiers: [.command, .shift],
+                isRepeat: false,
+                characters: "N"
+            ),
+            capturesCommandTab: true
+        )
+
+        XCTAssertEqual(
+            decision,
+            KeyboardDecision(command: nil, isConsumed: true)
+        )
+        XCTAssertTrue(session.isCycling)
+    }
+
+    func testPendingNewWindowGestureCancelsWhenTheEventTapIsInterrupted() {
+        var session = cyclingSession()
+        _ = session.interpret(commandNInput(), capturesCommandTab: true)
+
+        XCTAssertEqual(session.interrupt(), .switcher(.cancel))
+        XCTAssertEqual(
+            session.interpret(commandTabInput(), capturesCommandTab: true),
+            switcherDecision(.cycle(backwards: false))
+        )
     }
 
     func testOpenSwitcherConsumesUnknownCommandsAndKeyUpEvents() {
@@ -307,6 +512,25 @@ final class KeyboardInputSessionTests: XCTestCase {
             kind: .keyDown,
             keyCode: KeyboardKeyCode.tab,
             modifiers: backwards ? [.command, .shift] : [.command],
+            isRepeat: false
+        )
+    }
+
+    private func commandNInput(isRepeat: Bool = false) -> KeyboardInput {
+        KeyboardInput(
+            kind: .keyDown,
+            keyCode: newWindowKeyCode,
+            modifiers: [.command],
+            isRepeat: isRepeat,
+            characters: "n"
+        )
+    }
+
+    private func commandReleaseInput() -> KeyboardInput {
+        KeyboardInput(
+            kind: .flagsChanged,
+            keyCode: 55,
+            modifiers: [],
             isRepeat: false
         )
     }

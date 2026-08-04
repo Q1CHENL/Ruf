@@ -15,16 +15,65 @@ private func keyboardEventTapCallback(
     let flags = event.flags
     let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
     let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+    let modifiers = keyboardModifiers(from: flags)
+    let shouldReadCharacters = type == .keyDown
+        && !isRepeat
+        && modifiers == [.command]
+        && keyCode != KeyboardKeyCode.ansiN
+        && MainActor.assumeIsolated { controller.isCycling }
+    let characters = shouldReadCharacters ? keyboardCharacters(from: event) : nil
     let consumed = MainActor.assumeIsolated {
         controller.handle(
             type: type,
-            flags: flags,
             keyCode: keyCode,
-            isRepeat: isRepeat
+            modifiers: modifiers,
+            isRepeat: isRepeat,
+            characters: characters
         )
     }
 
     return consumed ? nil : Unmanaged.passUnretained(event)
+}
+
+private func keyboardCharacters(from event: CGEvent) -> String? {
+    var buffer = [UniChar](repeating: 0, count: 4)
+    var length = 0
+
+    buffer.withUnsafeMutableBufferPointer { characters in
+        event.keyboardGetUnicodeString(
+            maxStringLength: characters.count,
+            actualStringLength: &length,
+            unicodeString: characters.baseAddress
+        )
+    }
+
+    guard length > 0 else {
+        return nil
+    }
+
+    return String(
+        utf16CodeUnits: buffer,
+        count: min(length, buffer.count)
+    )
+}
+
+private func keyboardModifiers(
+    from flags: CGEventFlags
+) -> KeyboardModifiers {
+    var modifiers: KeyboardModifiers = []
+    if flags.contains(.maskCommand) {
+        modifiers.insert(.command)
+    }
+    if flags.contains(.maskShift) {
+        modifiers.insert(.shift)
+    }
+    if flags.contains(.maskControl) {
+        modifiers.insert(.control)
+    }
+    if flags.contains(.maskAlternate) {
+        modifiers.insert(.option)
+    }
+    return modifiers
 }
 
 @MainActor
@@ -35,6 +84,10 @@ final class KeyboardEventTap {
     private var runLoopSource: CFRunLoopSource?
     private var inputSession = KeyboardInputSession()
     private var capturesCommandTab: Bool
+
+    fileprivate var isCycling: Bool {
+        inputSession.isCycling
+    }
 
     var isRunning: Bool {
         guard let eventTap else {
@@ -123,9 +176,10 @@ final class KeyboardEventTap {
 
     fileprivate func handle(
         type: CGEventType,
-        flags: CGEventFlags,
         keyCode: Int64,
-        isRepeat: Bool
+        modifiers: KeyboardModifiers,
+        isRepeat: Bool,
+        characters: String?
     ) -> Bool {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             if let eventTap {
@@ -150,26 +204,13 @@ final class KeyboardEventTap {
             return false
         }
 
-        var modifiers: KeyboardModifiers = []
-        if flags.contains(.maskCommand) {
-            modifiers.insert(.command)
-        }
-        if flags.contains(.maskShift) {
-            modifiers.insert(.shift)
-        }
-        if flags.contains(.maskControl) {
-            modifiers.insert(.control)
-        }
-        if flags.contains(.maskAlternate) {
-            modifiers.insert(.option)
-        }
-
         let decision = inputSession.interpret(
             KeyboardInput(
                 kind: kind,
                 keyCode: keyCode,
                 modifiers: modifiers,
-                isRepeat: isRepeat
+                isRepeat: isRepeat,
+                characters: characters
             ),
             capturesCommandTab: capturesCommandTab
         )
