@@ -136,6 +136,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         snapshotTask = nil
         let actions = pendingActions
         pendingActions = []
+        let replayPlan = SwitcherActionReplayPlan(pendingActions: actions)
 
         guard !targets.isEmpty else {
             keyboardEventTap.resetInputSession()
@@ -144,7 +145,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         model.begin(with: targets, backwards: backwards)
 
-        for action in actions {
+        for action in replayPlan.beforePresentation {
             handleSwitcher(action)
             guard model.isPresented else {
                 return
@@ -152,6 +153,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         panelController.show(itemCount: targets.count)
+
+        for action in replayPlan.afterPresentation {
+            handleSwitcher(action)
+            if case .openNewWindow = action {
+                return
+            }
+            guard model.isPresented else {
+                return
+            }
+        }
     }
 
     private func commitSelection() {
@@ -174,19 +185,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func openNewWindow() {
-        guard let target = takeSelection() else {
-            return
-        }
-
-        let application = target.item.application
-        let shouldReopen: Bool
-        if case .reopenApplication = target.kind {
-            shouldReopen = true
-        } else {
-            shouldReopen = false
-        }
-
         Task { @MainActor in
+            guard await ApplicationActivation.waitUntilCurrentApplicationIsActive()
+            else {
+                cancelSwitcher()
+                NSSound.beep()
+                return
+            }
+
+            guard let target = takeSelection() else {
+                return
+            }
+
+            let application = target.item.application
+            let shouldReopen: Bool
+            if case .reopenApplication = target.kind {
+                shouldReopen = true
+            } else {
+                shouldReopen = false
+            }
+
             guard case .unavailable = await ApplicationWindowService.openNewWindow(
                 in: application
             ) else {

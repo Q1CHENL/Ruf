@@ -71,7 +71,10 @@ enum ApplicationWindowService {
     static func openNewWindow(
         in application: NSRunningApplication
     ) async -> NewWindowOpenResult {
-        application.activate()
+        guard await ApplicationActivation.transferTo(application) else {
+            return .unavailable
+        }
+
         let processIdentifier = application.processIdentifier
 
         return await Task.detached(priority: .userInitiated) {
