@@ -6,6 +6,7 @@ import Sparkle
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let catalog = ApplicationCatalog()
+    private let focusedWindowMover = FocusedWindowMover()
     private let model = SwitcherModel()
     private let preferences = AppPreferences()
 
@@ -17,7 +18,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     )
 
-    private lazy var keyboardEventTap = KeyboardEventTap { [weak self] command in
+    private lazy var keyboardEventTap = KeyboardEventTap(
+        capturesCommandTab: preferences.switcherMode == .ruf
+    ) { [weak self] command in
         self?.handle(command)
     }
 
@@ -51,8 +54,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
-        if preferences.switcherMode == .ruf, !keyboardEventTap.isRunning {
-            refreshShortcutState(
+        if !keyboardEventTap.isRunning {
+            refreshKeyboardCaptureState(
                 accessibilityGranted: AccessibilityPermission.isGranted
             )
         }
@@ -70,9 +73,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         snapshotTask?.cancel()
         stopPermissionMonitoring()
         keyboardEventTap.stop()
+        focusedWindowMover.stop()
     }
 
-    private func handle(_ command: SwitcherAction) {
+    private func handle(_ command: KeyboardCommand) {
+        switch command {
+        case let .switcher(action):
+            handleSwitcher(action)
+        case let .moveFocusedWindow(direction):
+            focusedWindowMover.move(direction)
+        }
+    }
+
+    private func handleSwitcher(_ command: SwitcherAction) {
         if snapshotTask != nil {
             if case .cancel = command {
                 cancelSwitcher()
@@ -130,7 +143,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         model.begin(with: targets, backwards: backwards)
 
         for action in actions {
-            handle(action)
+            handleSwitcher(action)
             guard model.isPresented else {
                 return
             }
@@ -232,7 +245,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func updateAccessibilityMenuItem(accessibilityGranted: Bool) {
-        if preferences.switcherMode == .system || keyboardEventTap.isRunning {
+        if keyboardEventTap.isRunning {
             accessibilityMenuItem?.isHidden = true
         } else {
             accessibilityMenuItem?.isHidden = false
@@ -242,43 +255,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    private func refreshShortcutState(accessibilityGranted: Bool) {
-        let shouldCaptureCommandTab = preferences.switcherMode == .ruf
-            && accessibilityGranted
+    private func refreshKeyboardCaptureState(accessibilityGranted: Bool) {
+        keyboardEventTap.setCapturesCommandTab(
+            preferences.switcherMode == .ruf
+        )
 
-        if shouldCaptureCommandTab {
+        if accessibilityGranted {
             stopPermissionMonitoring()
             keyboardEventTap.start()
         } else {
             keyboardEventTap.stop()
-
-            if preferences.switcherMode == .system {
-                stopPermissionMonitoring()
-            }
         }
 
         updateAccessibilityMenuItem(accessibilityGranted: accessibilityGranted)
     }
 
     private func applySwitcherMode() {
-        if preferences.switcherMode == .system, model.isPresented {
+        if preferences.switcherMode == .system,
+           model.isPresented || snapshotTask != nil {
             cancelSwitcher()
         }
 
         let accessibilityGranted = AccessibilityPermission.isGranted
-        refreshShortcutState(accessibilityGranted: accessibilityGranted)
+        refreshKeyboardCaptureState(accessibilityGranted: accessibilityGranted)
 
-        if preferences.switcherMode == .ruf,
-           !accessibilityGranted {
+        if !accessibilityGranted {
             requestAccessibility(openSystemSettings: false)
         }
     }
 
     private func requestAccessibility(openSystemSettings: Bool) {
-        guard preferences.switcherMode == .ruf else {
-            return
-        }
-
         AccessibilityPermission.request()
 
         if openSystemSettings {
@@ -291,7 +297,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func startPermissionMonitoring() {
         let accessibilityGranted = AccessibilityPermission.isGranted
         if accessibilityGranted {
-            refreshShortcutState(accessibilityGranted: accessibilityGranted)
+            refreshKeyboardCaptureState(
+                accessibilityGranted: accessibilityGranted
+            )
             return
         }
 
@@ -324,7 +332,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let accessibilityGranted = AccessibilityPermission.isGranted
         if accessibilityGranted {
-            refreshShortcutState(accessibilityGranted: accessibilityGranted)
+            refreshKeyboardCaptureState(
+                accessibilityGranted: accessibilityGranted
+            )
             return
         }
 
@@ -371,15 +381,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc
     private func enableAccessibility() {
-        if preferences.switcherMode == .system {
-            settingsWindowController.show()
+        let accessibilityGranted = AccessibilityPermission.isGranted
+        if accessibilityGranted {
+            refreshKeyboardCaptureState(
+                accessibilityGranted: accessibilityGranted
+            )
         } else {
-            let accessibilityGranted = AccessibilityPermission.isGranted
-            if accessibilityGranted {
-                refreshShortcutState(accessibilityGranted: accessibilityGranted)
-            } else {
-                requestAccessibility(openSystemSettings: true)
-            }
+            requestAccessibility(openSystemSettings: true)
         }
     }
 

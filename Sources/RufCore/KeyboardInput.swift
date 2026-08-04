@@ -32,15 +32,18 @@ public struct KeyboardInput: Sendable {
     public let kind: KeyboardEventKind
     public let keyCode: Int64
     public let modifiers: KeyboardModifiers
+    public let isRepeat: Bool
 
     public init(
         kind: KeyboardEventKind,
         keyCode: Int64,
-        modifiers: KeyboardModifiers
+        modifiers: KeyboardModifiers,
+        isRepeat: Bool
     ) {
         self.kind = kind
         self.keyCode = keyCode
         self.modifiers = modifiers
+        self.isRepeat = isRepeat
     }
 }
 
@@ -51,12 +54,17 @@ public enum SwitcherAction: Equatable, Sendable {
     case cancel
 }
 
+public enum KeyboardCommand: Equatable, Sendable {
+    case switcher(SwitcherAction)
+    case moveFocusedWindow(WindowMoveDirection)
+}
+
 public struct KeyboardDecision: Equatable, Sendable {
-    public let action: SwitcherAction?
+    public let command: KeyboardCommand?
     public let isConsumed: Bool
 
-    public init(action: SwitcherAction?, isConsumed: Bool) {
-        self.action = action
+    public init(command: KeyboardCommand?, isConsumed: Bool) {
+        self.command = command
         self.isConsumed = isConsumed
     }
 }
@@ -66,44 +74,72 @@ public struct KeyboardInputSession: Sendable {
 
     public init() {}
 
-    public mutating func interpret(_ input: KeyboardInput) -> KeyboardDecision {
-        let decision = decision(for: input)
+    public mutating func interpret(
+        _ input: KeyboardInput,
+        capturesCommandTab: Bool
+    ) -> KeyboardDecision {
+        let decision = decision(
+            for: input,
+            capturesCommandTab: capturesCommandTab
+        )
 
-        switch decision.action {
-        case .cycle:
+        switch decision.command {
+        case .switcher(.cycle):
             isCycling = true
-        case .commit, .cancel:
+        case .switcher(.commit), .switcher(.cancel):
             reset()
-        case .move, nil:
+        case .switcher(.move), .moveFocusedWindow, nil:
             break
         }
 
         return decision
     }
 
-    public mutating func interrupt() -> SwitcherAction? {
+    public mutating func interrupt() -> KeyboardCommand? {
         guard isCycling else {
             return nil
         }
 
         reset()
-        return .cancel
+        return .switcher(.cancel)
     }
 
     public mutating func reset() {
         isCycling = false
     }
 
-    private func decision(for input: KeyboardInput) -> KeyboardDecision {
+    private func decision(
+        for input: KeyboardInput,
+        capturesCommandTab: Bool
+    ) -> KeyboardDecision {
         if input.kind == .flagsChanged {
-            let action: SwitcherAction? = isCycling
+            let command: KeyboardCommand? = isCycling
                 && !input.modifiers.contains(.command)
-                ? .commit
+                ? .switcher(.commit)
                 : nil
-            return KeyboardDecision(action: action, isConsumed: false)
+            return KeyboardDecision(command: command, isConsumed: false)
         }
 
-        let isCommandTab = input.kind == .keyDown
+        let windowMoveModifiers: KeyboardModifiers = [
+            .control,
+            .option,
+            .command,
+        ]
+
+        if !isCycling,
+           input.kind == .keyDown,
+           input.modifiers == windowMoveModifiers,
+           let direction = windowMoveDirection(for: input.keyCode) {
+            return KeyboardDecision(
+                command: input.isRepeat
+                    ? nil
+                    : .moveFocusedWindow(direction),
+                isConsumed: true
+            )
+        }
+
+        let isCommandTab = capturesCommandTab
+            && input.kind == .keyDown
             && input.keyCode == KeyboardKeyCode.tab
             && input.modifiers.contains(.command)
             && !input.modifiers.contains(.control)
@@ -111,30 +147,32 @@ public struct KeyboardInputSession: Sendable {
 
         if isCommandTab {
             return KeyboardDecision(
-                action: .cycle(backwards: input.modifiers.contains(.shift)),
+                command: .switcher(
+                    .cycle(backwards: input.modifiers.contains(.shift))
+                ),
                 isConsumed: true
             )
         }
 
         guard isCycling else {
-            return KeyboardDecision(action: nil, isConsumed: false)
+            return KeyboardDecision(command: nil, isConsumed: false)
         }
 
         guard input.kind == .keyDown else {
-            return KeyboardDecision(action: nil, isConsumed: true)
+            return KeyboardDecision(command: nil, isConsumed: true)
         }
 
         if input.keyCode == KeyboardKeyCode.escape {
-            return KeyboardDecision(action: .cancel, isConsumed: true)
+            return KeyboardDecision(command: .switcher(.cancel), isConsumed: true)
         }
 
         if input.keyCode == KeyboardKeyCode.returnKey
             || input.keyCode == KeyboardKeyCode.keypadEnter {
-            return KeyboardDecision(action: .commit, isConsumed: true)
+            return KeyboardDecision(command: .switcher(.commit), isConsumed: true)
         }
 
         guard input.modifiers.contains(.command) else {
-            return KeyboardDecision(action: .commit, isConsumed: true)
+            return KeyboardDecision(command: .switcher(.commit), isConsumed: true)
         }
 
         let action: SwitcherAction? = switch input.keyCode {
@@ -150,6 +188,26 @@ public struct KeyboardInputSession: Sendable {
             nil
         }
 
-        return KeyboardDecision(action: action, isConsumed: true)
+        return KeyboardDecision(
+            command: action.map(KeyboardCommand.switcher),
+            isConsumed: true
+        )
+    }
+
+    private func windowMoveDirection(
+        for keyCode: Int64
+    ) -> WindowMoveDirection? {
+        switch keyCode {
+        case KeyboardKeyCode.leftArrow:
+            .left
+        case KeyboardKeyCode.rightArrow:
+            .right
+        case KeyboardKeyCode.upArrow:
+            .up
+        case KeyboardKeyCode.downArrow:
+            .down
+        default:
+            nil
+        }
     }
 }

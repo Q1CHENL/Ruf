@@ -26,13 +26,20 @@ struct SettingsView: View {
             }
 
             Section {
+                LabeledContent("Move current window") {
+                    Text("⌃⌥⌘ + ← ↑ ↓ →")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section {
                 LaunchAtLoginSetting(
                     onUserChange: preferences.markLaunchAtLoginConfigured
                 )
             }
         }
         .formStyle(.grouped)
-        .frame(width: 440, height: 190)
+        .frame(width: 440, height: 240)
         .onChange(of: preferences.switcherMode) {
             onSwitcherModeChanged()
         }

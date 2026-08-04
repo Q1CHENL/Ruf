@@ -14,8 +14,14 @@ private func keyboardEventTapCallback(
     let controller = Unmanaged<KeyboardEventTap>.fromOpaque(userInfo).takeUnretainedValue()
     let flags = event.flags
     let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+    let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
     let consumed = MainActor.assumeIsolated {
-        controller.handle(type: type, flags: flags, keyCode: keyCode)
+        controller.handle(
+            type: type,
+            flags: flags,
+            keyCode: keyCode,
+            isRepeat: isRepeat
+        )
     }
 
     return consumed ? nil : Unmanaged.passUnretained(event)
@@ -23,11 +29,12 @@ private func keyboardEventTapCallback(
 
 @MainActor
 final class KeyboardEventTap {
-    private let commandHandler: (SwitcherAction) -> Void
+    private let commandHandler: (KeyboardCommand) -> Void
 
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var inputSession = KeyboardInputSession()
+    private var capturesCommandTab: Bool
 
     var isRunning: Bool {
         guard let eventTap else {
@@ -37,7 +44,11 @@ final class KeyboardEventTap {
         return CGEvent.tapIsEnabled(tap: eventTap)
     }
 
-    init(commandHandler: @escaping (SwitcherAction) -> Void) {
+    init(
+        capturesCommandTab: Bool,
+        commandHandler: @escaping (KeyboardCommand) -> Void
+    ) {
+        self.capturesCommandTab = capturesCommandTab
         self.commandHandler = commandHandler
     }
 
@@ -88,6 +99,15 @@ final class KeyboardEventTap {
         inputSession.reset()
     }
 
+    func setCapturesCommandTab(_ capturesCommandTab: Bool) {
+        guard self.capturesCommandTab != capturesCommandTab else {
+            return
+        }
+
+        inputSession.reset()
+        self.capturesCommandTab = capturesCommandTab
+    }
+
     private func tearDownEventTap() {
         if let runLoopSource {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
@@ -104,7 +124,8 @@ final class KeyboardEventTap {
     fileprivate func handle(
         type: CGEventType,
         flags: CGEventFlags,
-        keyCode: Int64
+        keyCode: Int64,
+        isRepeat: Bool
     ) -> Bool {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             if let eventTap {
@@ -144,19 +165,25 @@ final class KeyboardEventTap {
         }
 
         let decision = inputSession.interpret(
-            KeyboardInput(kind: kind, keyCode: keyCode, modifiers: modifiers)
+            KeyboardInput(
+                kind: kind,
+                keyCode: keyCode,
+                modifiers: modifiers,
+                isRepeat: isRepeat
+            ),
+            capturesCommandTab: capturesCommandTab
         )
 
-        if let action = decision.action {
-            enqueue(action)
+        if let command = decision.command {
+            enqueue(command)
         }
 
         return decision.isConsumed
     }
 
-    private func enqueue(_ action: SwitcherAction) {
+    private func enqueue(_ command: KeyboardCommand) {
         DispatchQueue.main.async { [weak self] in
-            self?.commandHandler(action)
+            self?.commandHandler(command)
         }
     }
 }
