@@ -182,7 +182,7 @@ enum ApplicationWindowService {
     ) -> [pid_t: ApplicationWindowState] {
         guard
             AccessibilityPermission.isGranted,
-            let visibleWindowCounts = visibleWindowCounts()
+            let visibleWindowIdentifiers = visibleWindowIdentifiers()
         else {
             return [:]
         }
@@ -190,7 +190,7 @@ enum ApplicationWindowService {
         let deadline = DispatchTime.now() + totalQueryBudget
         let plan = WindowQueryPlan(
             processIdentifiers: processIdentifiers,
-            visibleWindowCounts: visibleWindowCounts
+            visibleWindowIdentifiers: visibleWindowIdentifiers
         )
         var states: [pid_t: ApplicationWindowState] = [:]
 
@@ -201,6 +201,7 @@ enum ApplicationWindowService {
 
             let windows = windows(
                 for: processIdentifier,
+                plan: plan,
                 deadline: deadline
             )
             guard windows.count > 1 else {
@@ -237,10 +238,11 @@ enum ApplicationWindowService {
         return states
     }
 
-    private static func visibleWindowCounts() -> [pid_t: Int]? {
+    private static func visibleWindowIdentifiers() -> [pid_t: Set<CGWindowID>]? {
         // One visible WindowServer window is already an ordinary app target.
         // AX is only needed to distinguish zero windows from another Space,
-        // or to enumerate apps with multiple visible windows.
+        // or to enumerate apps with multiple visible windows. The identifiers
+        // also reject ordered-out windows that remain in an app's AX list.
         let options: CGWindowListOption = [
             .optionOnScreenOnly,
             .excludeDesktopElements,
@@ -252,15 +254,23 @@ enum ApplicationWindowService {
             return nil
         }
 
-        return windowInfo.reduce(into: [pid_t: Int]()) { counts, window in
+        return windowInfo.reduce(into: [pid_t: Set<CGWindowID>]()) {
+            identifiers, window in
             guard
                 window[kCGWindowLayer as String] as? Int == 0,
-                let processIdentifier = window[kCGWindowOwnerPID as String] as? Int
+                let processIdentifier = window[
+                    kCGWindowOwnerPID as String
+                ] as? Int,
+                let windowIdentifier = window[
+                    kCGWindowNumber as String
+                ] as? CGWindowID
             else {
                 return
             }
 
-            counts[pid_t(processIdentifier), default: 0] += 1
+            identifiers[pid_t(processIdentifier), default: []].insert(
+                windowIdentifier
+            )
         }
     }
 
@@ -287,6 +297,7 @@ enum ApplicationWindowService {
 
     private static func windows(
         for processIdentifier: pid_t,
+        plan: WindowQueryPlan,
         deadline: DispatchTime
     ) -> [ApplicationWindow] {
         let applicationElement = AXUIElementCreateApplication(processIdentifier)
@@ -309,6 +320,18 @@ enum ApplicationWindowService {
             }
 
             AXUIElementSetMessagingTimeout(element, messageTimeout)
+            guard
+                let windowIdentifier = AXWindowIdentifierResolver.identifier(
+                    for: element
+                ),
+                plan.containsVisibleWindow(
+                    identifier: windowIdentifier,
+                    processIdentifier: processIdentifier
+                )
+            else {
+                continue
+            }
+
             guard let windowValues = values(
                 of: [
                     kAXSubroleAttribute,
