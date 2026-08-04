@@ -64,7 +64,7 @@ final class ApplicationCatalog: NSObject {
                 !application.isTerminated,
                 let bundleIdentifier = application.bundleIdentifier,
                 let name = application.localizedName,
-                let icon = application.icon
+                let icon = ApplicationIconResolver.icon(for: application)
             else {
                 continue
             }
