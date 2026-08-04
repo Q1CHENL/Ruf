@@ -18,6 +18,15 @@ swift test
 ```
 
 To create an optimized universal release build without launching Ruf, run
-`./script/build_and_run.sh --package`. The app, disk image, and Sparkle appcast
-are written to `dist/Ruf.app`, `dist/Ruf.dmg`, and
-`dist/appcast.xml`.
+`./script/build_and_run.sh --package`. The app and disk image are written to
+`dist/Ruf.app` and `dist/Ruf.dmg`.
+
+Generating the signed Sparkle feed is a separate release step:
+
+```sh
+./script/build_and_run.sh --appcast
+```
+
+This updates `dist/appcast.xml` from the existing release artifacts and may ask
+for access to the Sparkle signing key in Keychain. If signing fails or is
+interrupted, an existing appcast is left unchanged.

@@ -81,17 +81,48 @@ compile_app_icon() {
 }
 
 generate_appcast() {
+    local appcast_path="$DIST_DIR/appcast.xml"
+    local staging_directory
     local version
+
+    if [[ ! -f "$APP_CONTENTS/Info.plist" || ! -f "$APP_DISK_IMAGE" ]]; then
+        echo "Release artifacts are missing; run $0 --package first" >&2
+        return 1
+    fi
+
     version="$(/usr/libexec/PlistBuddy \
         -c "Print :CFBundleShortVersionString" \
         "$APP_CONTENTS/Info.plist")"
+    staging_directory="$(mktemp -d "$DIST_DIR/.appcast.XXXXXX")"
 
-    rm -f "$DIST_DIR/appcast.xml"
-    "$SPARKLE_TOOLS/generate_appcast" \
-        --account "$SPARKLE_KEY_ACCOUNT" \
-        --download-url-prefix "$REPOSITORY_URL/releases/download/v$version/" \
-        --link "$REPOSITORY_URL" \
-        "$DIST_DIR"
+    (
+        trap 'rm -rf "$staging_directory"' EXIT
+
+        /usr/bin/ditto \
+            --norsrc \
+            "$APP_DISK_IMAGE" \
+            "$staging_directory/$APP_NAME.dmg"
+
+        if [[ -f "$appcast_path" ]]; then
+            /usr/bin/ditto \
+                --norsrc \
+                "$appcast_path" \
+                "$staging_directory/appcast.xml"
+        fi
+
+        "$SPARKLE_TOOLS/generate_appcast" \
+            --account "$SPARKLE_KEY_ACCOUNT" \
+            --download-url-prefix "$REPOSITORY_URL/releases/download/v$version/" \
+            --link "$REPOSITORY_URL" \
+            "$staging_directory"
+
+        if [[ ! -s "$staging_directory/appcast.xml" ]]; then
+            echo "Sparkle did not generate an appcast" >&2
+            exit 1
+        fi
+
+        /bin/mv -f "$staging_directory/appcast.xml" "$appcast_path"
+    )
 }
 
 package_app() {
@@ -122,10 +153,6 @@ package_app() {
     codesign --force --sign - --identifier "$BUNDLE_ID" "$APP_BUNDLE"
     codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
     create_disk_image
-
-    if [[ "$configuration" == "release" ]]; then
-        generate_appcast
-    fi
 }
 
 open_app() {
@@ -145,6 +172,9 @@ launch_debug_app() {
 case "$MODE" in
     package)
         package_app release "${UNIVERSAL_ARCHS[@]}"
+        ;;
+    appcast)
+        generate_appcast
         ;;
     run)
         launch_debug_app
@@ -173,7 +203,7 @@ case "$MODE" in
         exit 1
         ;;
     *)
-        echo "usage: $0 [run|--package|--debug|--logs|--telemetry|--verify]" >&2
+        echo "usage: $0 [run|--package|--appcast|--debug|--logs|--telemetry|--verify]" >&2
         exit 2
         ;;
 esac
