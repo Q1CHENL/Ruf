@@ -19,6 +19,7 @@ public struct KeyboardModifiers: OptionSet, Sendable {
 
 public enum KeyboardKeyCode {
     public static let ansiN: Int64 = 45
+    public static let ansiQ: Int64 = 12
     public static let tab: Int64 = 48
     public static let returnKey: Int64 = 36
     public static let keypadEnter: Int64 = 76
@@ -55,6 +56,7 @@ public enum SwitcherAction: Equatable, Sendable {
     case cycle(backwards: Bool)
     case move(GridMove)
     case openNewWindow
+    case quitApplication
     case commit
     case cancel
 }
@@ -75,13 +77,14 @@ public struct KeyboardDecision: Equatable, Sendable {
 }
 
 public struct KeyboardInputSession: Sendable {
-    private struct PendingNewWindowGesture: Sendable {
+    private struct PendingSwitcherGesture: Sendable {
         let triggerKeyCode: Int64
+        let action: SwitcherAction
         var isTriggerKeyDown: Bool
     }
 
     public private(set) var isCycling = false
-    private var pendingNewWindowGesture: PendingNewWindowGesture?
+    private var pendingSwitcherGesture: PendingSwitcherGesture?
 
     public init() {}
 
@@ -89,18 +92,19 @@ public struct KeyboardInputSession: Sendable {
         _ input: KeyboardInput,
         capturesCommandTab: Bool
     ) -> KeyboardDecision {
-        if let pendingNewWindowGesture {
-            let decision = continueNewWindowGesture(
-                pendingNewWindowGesture,
+        if let pendingSwitcherGesture {
+            let decision = continueSwitcherGesture(
+                pendingSwitcherGesture,
                 with: input
             )
             updateSession(for: decision)
             return decision
         }
 
-        if startsNewWindowGesture(with: input) {
-            pendingNewWindowGesture = PendingNewWindowGesture(
+        if let action = switcherGestureAction(for: input) {
+            pendingSwitcherGesture = PendingSwitcherGesture(
                 triggerKeyCode: input.keyCode,
+                action: action,
                 isTriggerKeyDown: true
             )
             return KeyboardDecision(command: nil, isConsumed: true)
@@ -120,6 +124,7 @@ public struct KeyboardInputSession: Sendable {
         case .switcher(.cycle):
             isCycling = true
         case .switcher(.openNewWindow),
+             .switcher(.quitApplication),
              .switcher(.commit),
              .switcher(.cancel):
             reset()
@@ -139,22 +144,34 @@ public struct KeyboardInputSession: Sendable {
 
     public mutating func reset() {
         isCycling = false
-        pendingNewWindowGesture = nil
+        pendingSwitcherGesture = nil
     }
 
-    private func startsNewWindowGesture(
-        with input: KeyboardInput
-    ) -> Bool {
-        isCycling
-            && input.kind == .keyDown
-            && !input.isRepeat
-            && input.modifiers == [.command]
-            && (input.keyCode == KeyboardKeyCode.ansiN
-                || input.characters?.lowercased() == "n")
+    private func switcherGestureAction(
+        for input: KeyboardInput
+    ) -> SwitcherAction? {
+        guard isCycling,
+              input.kind == .keyDown,
+              !input.isRepeat,
+              input.modifiers == [.command] else {
+            return nil
+        }
+
+        if input.keyCode == KeyboardKeyCode.ansiN
+            || input.characters?.lowercased() == "n" {
+            return .openNewWindow
+        }
+
+        if input.keyCode == KeyboardKeyCode.ansiQ
+            || input.characters?.lowercased() == "q" {
+            return .quitApplication
+        }
+
+        return nil
     }
 
-    private mutating func continueNewWindowGesture(
-        _ pendingGesture: PendingNewWindowGesture,
+    private mutating func continueSwitcherGesture(
+        _ pendingGesture: PendingSwitcherGesture,
         with input: KeyboardInput
     ) -> KeyboardDecision {
         var gesture = pendingGesture
@@ -167,11 +184,11 @@ public struct KeyboardInputSession: Sendable {
         let isCommandDown = input.modifiers.contains(.command)
         let isComplete = !gesture.isTriggerKeyDown
             && !isCommandDown
-        pendingNewWindowGesture = isComplete ? nil : gesture
+        pendingSwitcherGesture = isComplete ? nil : gesture
 
         return KeyboardDecision(
             command: isComplete
-                ? .switcher(.openNewWindow)
+                ? .switcher(gesture.action)
                 : nil,
             isConsumed: input.kind != .flagsChanged
         )

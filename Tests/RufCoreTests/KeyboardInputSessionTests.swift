@@ -288,6 +288,64 @@ final class KeyboardInputSessionTests: XCTestCase {
         XCTAssertTrue(session.isCycling)
     }
 
+    func testQuitApplicationGestureCompletesAfterQAndCommandAreReleased() {
+        var session = cyclingSession()
+
+        let keyDown = session.interpret(
+            KeyboardInput(
+                kind: .keyDown,
+                keyCode: KeyboardKeyCode.ansiQ,
+                modifiers: [.command],
+                isRepeat: false,
+                characters: "й"
+            ),
+            capturesCommandTab: true
+        )
+        XCTAssertEqual(
+            keyDown,
+            KeyboardDecision(command: nil, isConsumed: true)
+        )
+
+        let repeated = session.interpret(
+            KeyboardInput(
+                kind: .keyDown,
+                keyCode: KeyboardKeyCode.ansiQ,
+                modifiers: [.command],
+                isRepeat: true,
+                characters: "й"
+            ),
+            capturesCommandTab: true
+        )
+        XCTAssertEqual(
+            repeated,
+            KeyboardDecision(command: nil, isConsumed: true)
+        )
+
+        let qRelease = session.interpret(
+            KeyboardInput(
+                kind: .keyUp,
+                keyCode: KeyboardKeyCode.ansiQ,
+                modifiers: [.command],
+                isRepeat: false
+            ),
+            capturesCommandTab: true
+        )
+        XCTAssertEqual(
+            qRelease,
+            KeyboardDecision(command: nil, isConsumed: true)
+        )
+
+        let commandRelease = session.interpret(
+            commandReleaseInput(),
+            capturesCommandTab: true
+        )
+        XCTAssertEqual(
+            commandRelease,
+            switcherDecision(.quitApplication, isConsumed: false)
+        )
+        XCTAssertFalse(session.isCycling)
+    }
+
     func testPendingNewWindowGestureCancelsWhenTheEventTapIsInterrupted() {
         var session = cyclingSession()
         _ = session.interpret(commandNInput(), capturesCommandTab: true)
@@ -302,10 +360,10 @@ final class KeyboardInputSessionTests: XCTestCase {
     func testOpenSwitcherConsumesUnknownCommandsAndKeyUpEvents() {
         var session = cyclingSession()
 
-        let commandQ = session.interpret(
+        let commandW = session.interpret(
             KeyboardInput(
                 kind: .keyDown,
-                keyCode: 12,
+                keyCode: 13,
                 modifiers: [.command],
                 isRepeat: false
             ),
@@ -321,7 +379,7 @@ final class KeyboardInputSessionTests: XCTestCase {
             capturesCommandTab: true
         )
 
-        XCTAssertEqual(commandQ, KeyboardDecision(command: nil, isConsumed: true))
+        XCTAssertEqual(commandW, KeyboardDecision(command: nil, isConsumed: true))
         XCTAssertEqual(tabKeyUp, KeyboardDecision(command: nil, isConsumed: true))
     }
 
@@ -331,7 +389,7 @@ final class KeyboardInputSessionTests: XCTestCase {
         let commandQ = session.interpret(
             KeyboardInput(
                 kind: .keyDown,
-                keyCode: 12,
+                keyCode: KeyboardKeyCode.ansiQ,
                 modifiers: [.command],
                 isRepeat: false
             ),

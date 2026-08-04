@@ -20,6 +20,7 @@ private func keyboardEventTapCallback(
         && !isRepeat
         && modifiers == [.command]
         && keyCode != KeyboardKeyCode.ansiN
+        && keyCode != KeyboardKeyCode.ansiQ
         && MainActor.assumeIsolated { controller.isCycling }
     let characters = shouldReadCharacters ? keyboardCharacters(from: event) : nil
     let consumed = MainActor.assumeIsolated {

@@ -106,6 +106,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             model.move(move)
         case .openNewWindow:
             openNewWindow()
+        case .quitApplication:
+            quitSelectedApplication()
         case .commit:
             commitSelection()
         case .cancel:
@@ -209,6 +211,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             } else {
                 NSSound.beep()
             }
+        }
+    }
+
+    private func quitSelectedApplication() {
+        guard let target = takeSelection() else {
+            return
+        }
+
+        if !target.item.application.terminate() {
+            NSSound.beep()
         }
     }
 
