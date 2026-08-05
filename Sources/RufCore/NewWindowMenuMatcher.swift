@@ -23,31 +23,39 @@ public enum NewWindowMenuTitleMatcher {
     }
 }
 
+public enum NewWindowMenuItemMatch: Equatable, Sendable {
+    case exactTitle
+    case shortcutFallback
+    case none
+}
+
 public enum NewWindowMenuItemMatcher {
-    public static func shouldPress(
+    public static func match(
         title: String?,
         isEnabled: Bool,
         hasChildren: Bool,
         isInsideNewWindowSubmenu: Bool,
-        isInsideFileMenu: Bool,
+        isDirectTopLevelMenuItem: Bool,
         commandCharacter: String?,
         commandModifiers: UInt32?
-    ) -> Bool {
+    ) -> NewWindowMenuItemMatch {
         guard isEnabled, !hasChildren else {
-            return false
+            return .none
         }
 
         if let title, NewWindowMenuTitleMatcher.matches(title) {
-            return true
+            return .exactTitle
         }
 
-        guard isInsideNewWindowSubmenu || isInsideFileMenu,
+        guard isInsideNewWindowSubmenu || isDirectTopLevelMenuItem,
               commandModifiers == 0,
               let commandCharacter else {
-            return false
+            return .none
         }
 
         return normalizedMenuText(commandCharacter) == "n"
+            ? .shortcutFallback
+            : .none
     }
 }
 
@@ -57,7 +65,29 @@ public enum NewWindowMenuSearchOutcome: Equatable, Sendable {
     case noMatch
 }
 
+public enum NewWindowMenuDeferredDecision: Equatable, Sendable {
+    case requestFallback
+    case reportIncomplete
+    case noMatch
+}
+
 public enum NewWindowMenuSearchDecision {
+    public static func deferredDecision(
+        hasFallback: Bool,
+        wasIncomplete: Bool,
+        hasTimeRemaining: Bool
+    ) -> NewWindowMenuDeferredDecision {
+        if wasIncomplete, hasTimeRemaining {
+            return .reportIncomplete
+        }
+
+        if hasFallback {
+            return .requestFallback
+        }
+
+        return wasIncomplete ? .reportIncomplete : .noMatch
+    }
+
     public static func shouldRetry(
         after outcome: NewWindowMenuSearchOutcome,
         hasTimeRemaining: Bool

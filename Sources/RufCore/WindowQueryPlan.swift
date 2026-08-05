@@ -1,19 +1,24 @@
 public enum WindowQueryDisposition: Equatable, Sendable {
     case application
+    case singleWindow
     case windowless
     case windows
 
     public static func resolve(
-        hasAXWindows: Bool,
+        hasSwitchableAXWindows: Bool,
         hasVisibleWindows: Bool,
         switchableWindowMinimizedStates: [Bool]
     ) -> Self {
+        if switchableWindowMinimizedStates == [false] {
+            return .singleWindow
+        }
+
         if switchableWindowMinimizedStates.count > 1
             || switchableWindowMinimizedStates.contains(true) {
             return .windows
         }
 
-        return hasAXWindows || hasVisibleWindows
+        return hasSwitchableAXWindows || hasVisibleWindows
             ? .application
             : .windowless
     }

@@ -38,10 +38,10 @@ final class WindowQueryPlanTests: XCTestCase {
         )
     }
 
-    func testChoosesApplicationWindowAndReopenTargetShapes() {
+    func testChoosesTargetShapeFromSwitchableWindows() {
         XCTAssertEqual(
             WindowQueryDisposition.resolve(
-                hasAXWindows: false,
+                hasSwitchableAXWindows: false,
                 hasVisibleWindows: false,
                 switchableWindowMinimizedStates: []
             ),
@@ -49,7 +49,7 @@ final class WindowQueryPlanTests: XCTestCase {
         )
         XCTAssertEqual(
             WindowQueryDisposition.resolve(
-                hasAXWindows: false,
+                hasSwitchableAXWindows: false,
                 hasVisibleWindows: true,
                 switchableWindowMinimizedStates: []
             ),
@@ -57,7 +57,7 @@ final class WindowQueryPlanTests: XCTestCase {
         )
         XCTAssertEqual(
             WindowQueryDisposition.resolve(
-                hasAXWindows: true,
+                hasSwitchableAXWindows: true,
                 hasVisibleWindows: false,
                 switchableWindowMinimizedStates: []
             ),
@@ -65,15 +65,15 @@ final class WindowQueryPlanTests: XCTestCase {
         )
         XCTAssertEqual(
             WindowQueryDisposition.resolve(
-                hasAXWindows: true,
+                hasSwitchableAXWindows: true,
                 hasVisibleWindows: true,
                 switchableWindowMinimizedStates: [false]
             ),
-            .application
+            .singleWindow
         )
         XCTAssertEqual(
             WindowQueryDisposition.resolve(
-                hasAXWindows: true,
+                hasSwitchableAXWindows: true,
                 hasVisibleWindows: false,
                 switchableWindowMinimizedStates: [true]
             ),
@@ -81,7 +81,7 @@ final class WindowQueryPlanTests: XCTestCase {
         )
         XCTAssertEqual(
             WindowQueryDisposition.resolve(
-                hasAXWindows: true,
+                hasSwitchableAXWindows: true,
                 hasVisibleWindows: true,
                 switchableWindowMinimizedStates: [false, true]
             ),

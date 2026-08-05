@@ -2,6 +2,7 @@ import RufCore
 
 enum SwitchTargetKind {
     case application
+    case applicationWindow(ApplicationWindow)
     case window(ApplicationWindow)
     case reopenApplication
 }
@@ -40,7 +41,7 @@ struct SwitchTarget {
         let targetLabel: String
 
         switch kind {
-        case .application:
+        case .application, .applicationWindow:
             targetLabel = item.name
         case let .window(window):
             targetLabel = "\(item.name), \(window.title)"

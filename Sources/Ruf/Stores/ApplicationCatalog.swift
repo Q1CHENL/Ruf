@@ -46,6 +46,14 @@ final class ApplicationCatalog: NSObject {
             }
 
             switch windowStates[item.application.processIdentifier] {
+            case let .singleWindow(window)?:
+                return [
+                    SwitchTarget(
+                        item: item,
+                        kind: .applicationWindow(window),
+                        dockBadge: dockBadge
+                    ),
+                ]
             case .windowless?:
                 return [
                     SwitchTarget(

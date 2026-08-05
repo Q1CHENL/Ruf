@@ -44,8 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var remainingPermissionChecks = 0
     private var snapshotTask: Task<Void, Never>?
     private var loadingSession = SwitcherLoadingSession()
-    private var newWindowTask: Task<Void, Never>?
-    private var newWindowRequestID: UUID?
+    private var newWindowTasks: [UUID: Task<Void, Never>] = [:]
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         enableLaunchAtLoginByDefaultIfNeeded()
@@ -73,7 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         snapshotTask?.cancel()
-        cancelNewWindowRequest()
+        cancelNewWindowRequests()
         stopPermissionMonitoring()
         keyboardEventTap.stop()
         focusedWindowMover.stop()
@@ -120,7 +119,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func loadTargets(backwards: Bool) {
-        cancelNewWindowRequest()
         loadingSession.beginLoading()
         snapshotTask = Task { [weak self] in
             guard let self else {
@@ -179,7 +177,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         switch target.kind {
         case .application:
             target.item.application.activate(options: [.activateAllWindows])
-        case let .window(window):
+        case let .applicationWindow(window), let .window(window):
             ApplicationWindowService.activate(
                 window,
                 in: target.item.application
@@ -194,27 +192,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
 
-        cancelNewWindowRequest()
+        openNewWindow(for: target)
+    }
+
+    private func openNewWindow(for target: SwitchTarget) {
+        if case .reopenApplication = target.kind {
+            ApplicationWindowService.reopen(target.item.application)
+            return
+        }
+
         let requestID = UUID()
-        newWindowRequestID = requestID
-        newWindowTask = Task { @MainActor [weak self] in
+        newWindowTasks[requestID] = Task { @MainActor [weak self] in
             guard let self else {
                 return
             }
 
             defer {
-                if newWindowRequestID == requestID {
-                    newWindowTask = nil
-                    newWindowRequestID = nil
-                }
+                newWindowTasks[requestID] = nil
             }
 
             let application = target.item.application
-            let shouldReopen: Bool
-            if case .reopenApplication = target.kind {
-                shouldReopen = true
-            } else {
-                shouldReopen = false
+            switch target.kind {
+            case let .applicationWindow(window), let .window(window):
+                ApplicationWindowService.activate(window, in: application)
+            case .application, .reopenApplication:
+                break
             }
 
             let result = await ApplicationWindowService.openNewWindow(
@@ -225,18 +227,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 return
             }
 
-            if shouldReopen {
-                ApplicationWindowService.reopen(application)
-            } else {
-                NSSound.beep()
-            }
+            NSSound.beep()
         }
     }
 
-    private func cancelNewWindowRequest() {
-        newWindowTask?.cancel()
-        newWindowTask = nil
-        newWindowRequestID = nil
+    private func cancelNewWindowRequests() {
+        for task in newWindowTasks.values {
+            task.cancel()
+        }
+        newWindowTasks.removeAll()
     }
 
     private func quitSelectedApplication() {

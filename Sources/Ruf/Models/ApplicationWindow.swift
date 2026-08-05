@@ -9,6 +9,7 @@ struct ApplicationWindow: @unchecked Sendable {
 }
 
 enum ApplicationWindowState: Sendable {
+    case singleWindow(ApplicationWindow)
     case windowless
     case windows([ApplicationWindow])
 }

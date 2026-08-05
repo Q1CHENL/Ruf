@@ -12,7 +12,7 @@ enum ApplicationWindowService {
     private struct MenuTraversalEntry {
         let element: AXUIElement
         let isInsideNewWindowSubmenu: Bool
-        let isInsideFileMenu: Bool
+        let menuDepth: Int
     }
 
     private enum MenuBarQueryResult {
@@ -22,7 +22,7 @@ enum ApplicationWindowService {
     }
 
     private struct ApplicationWindowsQuery: Sendable {
-        let hasAXWindows: Bool
+        let hasSwitchableAXWindows: Bool
         let windows: [ApplicationWindow]
     }
 
@@ -219,21 +219,39 @@ enum ApplicationWindowService {
             MenuTraversalEntry(
                 element: menuBar,
                 isInsideNewWindowSubmenu: false,
-                isInsideFileMenu: false
+                menuDepth: 0
             ),
         ]
         var index = 0
+        var shortcutFallback: AXUIElement?
         var wasIncomplete = false
 
         while index < elements.count {
-            guard !Task.isCancelled,
-                  DispatchTime.now() < deadline else {
-                return .incomplete
+            guard !Task.isCancelled else {
+                return .noMatch
+            }
+
+            let hasTimeRemaining = DispatchTime.now() < deadline
+            guard hasTimeRemaining else {
+                return resolveDeferredNewWindowSearch(
+                    shortcutFallback: shortcutFallback,
+                    wasIncomplete: wasIncomplete,
+                    hasTimeRemaining: false
+                )
             }
 
             let entry = elements[index]
-            let element = entry.element
+            if entry.menuDepth > 1, shortcutFallback != nil {
+                return resolveDeferredNewWindowSearch(
+                    shortcutFallback: shortcutFallback,
+                    wasIncomplete: wasIncomplete,
+                    hasTimeRemaining: true
+                )
+            }
+
             index += 1
+
+            let element = entry.element
             AXClientContext.setMessagingTimeout(
                 menuMessageTimeout,
                 for: element
@@ -266,6 +284,8 @@ enum ApplicationWindowService {
 
             let isMenuItem = role == kAXMenuItemRole
             let hasChildren = !children.isEmpty
+            let isDirectTopLevelMenuItem = isMenuItem
+                && entry.menuDepth == 1
             let entersNewWindowSubmenu = isMenuItem
                 && isEnabled
                 && hasChildren
@@ -278,7 +298,7 @@ enum ApplicationWindowService {
                 && !hasChildren
                 && (
                     entry.isInsideNewWindowSubmenu
-                        || entry.isInsideFileMenu
+                        || isDirectTopLevelMenuItem
                 )
                 && title.map(NewWindowMenuTitleMatcher.matches) != true
 
@@ -305,52 +325,94 @@ enum ApplicationWindowService {
                 commandModifiers = modifierNumber?.uint32Value
             }
 
-            if isMenuItem,
-               NewWindowMenuItemMatcher.shouldPress(
-                   title: title,
-                   isEnabled: isEnabled,
-                   hasChildren: hasChildren,
-                   isInsideNewWindowSubmenu: entry.isInsideNewWindowSubmenu,
-                   isInsideFileMenu: entry.isInsideFileMenu,
-                   commandCharacter: commandCharacter,
-                   commandModifiers: commandModifiers
-               ) {
-                guard !Task.isCancelled else {
-                    return .noMatch
+            let match = isMenuItem
+                ? NewWindowMenuItemMatcher.match(
+                    title: title,
+                    isEnabled: isEnabled,
+                    hasChildren: hasChildren,
+                    isInsideNewWindowSubmenu: entry.isInsideNewWindowSubmenu,
+                    isDirectTopLevelMenuItem: isDirectTopLevelMenuItem,
+                    commandCharacter: commandCharacter,
+                    commandModifiers: commandModifiers
+                )
+                : .none
+
+            switch match {
+            case .exactTitle:
+                return requestNewWindowAction(on: element)
+            case .shortcutFallback:
+                if entry.isInsideNewWindowSubmenu {
+                    return requestNewWindowAction(on: element)
                 }
-                AXClientContext.withDefaultIdentity {
-                    _ = AXUIElementPerformAction(
-                        element,
-                        kAXPressAction as CFString
-                    )
-                }
-                return .actionRequested
+                shortcutFallback = shortcutFallback ?? element
+            case .none:
+                break
             }
 
             let isInsideNewWindowSubmenu = entry.isInsideNewWindowSubmenu
                 || entersNewWindowSubmenu
-            let isMenuBar = role == kAXMenuBarRole
             let remainingCapacity = maximumMenuElementCount - elements.count
             if children.count > remainingCapacity {
                 wasIncomplete = true
             }
-            for (childIndex, child) in children
-                .prefix(remainingCapacity)
-                .enumerated() {
+
+            let childMenuDepth = entry.menuDepth
+                + (role == kAXMenuRole ? 1 : 0)
+            let appendedChildren = children.prefix(remainingCapacity)
+            for child in appendedChildren {
                 elements.append(
                     MenuTraversalEntry(
                         element: child,
                         isInsideNewWindowSubmenu: isInsideNewWindowSubmenu,
-                        // AppKit reserves the first application menu item;
-                        // the standard File menu is the second top-level item.
-                        isInsideFileMenu: entry.isInsideFileMenu
-                            || (isMenuBar && childIndex == 1)
+                        menuDepth: childMenuDepth
                     )
                 )
             }
         }
 
-        return wasIncomplete ? .incomplete : .noMatch
+        return resolveDeferredNewWindowSearch(
+            shortcutFallback: shortcutFallback,
+            wasIncomplete: wasIncomplete,
+            hasTimeRemaining: DispatchTime.now() < deadline
+        )
+    }
+
+    private static func resolveDeferredNewWindowSearch(
+        shortcutFallback: AXUIElement?,
+        wasIncomplete: Bool,
+        hasTimeRemaining: Bool
+    ) -> NewWindowMenuSearchOutcome {
+        switch NewWindowMenuSearchDecision.deferredDecision(
+            hasFallback: shortcutFallback != nil,
+            wasIncomplete: wasIncomplete,
+            hasTimeRemaining: hasTimeRemaining
+        ) {
+        case .requestFallback:
+            guard let shortcutFallback else {
+                return .noMatch
+            }
+            return requestNewWindowAction(on: shortcutFallback)
+        case .reportIncomplete:
+            return .incomplete
+        case .noMatch:
+            return .noMatch
+        }
+    }
+
+    private static func requestNewWindowAction(
+        on element: AXUIElement
+    ) -> NewWindowMenuSearchOutcome {
+        guard !Task.isCancelled else {
+            return .noMatch
+        }
+
+        AXClientContext.withDefaultIdentity {
+            _ = AXUIElementPerformAction(
+                element,
+                kAXPressAction as CFString
+            )
+        }
+        return .actionRequested
     }
 
     private static func queryStates(
@@ -443,7 +505,7 @@ enum ApplicationWindowService {
         }
 
         let disposition = WindowQueryDisposition.resolve(
-            hasAXWindows: query.hasAXWindows,
+            hasSwitchableAXWindows: query.hasSwitchableAXWindows,
             hasVisibleWindows: plan.hasVisibleWindows(
                 for: processIdentifier
             ),
@@ -454,6 +516,10 @@ enum ApplicationWindowService {
         switch disposition {
         case .application:
             state = nil
+        case .singleWindow:
+            state = query.windows.first.map(
+                ApplicationWindowState.singleWindow
+            )
         case .windowless:
             state = .windowless
         case .windows:
@@ -527,6 +593,7 @@ enum ApplicationWindowService {
             applicationValues[1]
         )
         var windows: [ApplicationWindow] = []
+        var hasSwitchableAXWindows = false
 
         for element in elements {
             guard !Task.isCancelled,
@@ -562,6 +629,7 @@ enum ApplicationWindowService {
             guard !trimmedTitle.isEmpty else {
                 continue
             }
+            hasSwitchableAXWindows = true
 
             let windowIdentifier = isMinimized
                 ? nil
@@ -591,7 +659,7 @@ enum ApplicationWindowService {
         }
 
         return ApplicationWindowsQuery(
-            hasAXWindows: !elements.isEmpty,
+            hasSwitchableAXWindows: hasSwitchableAXWindows,
             windows: windows
         )
     }
