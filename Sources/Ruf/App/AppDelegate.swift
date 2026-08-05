@@ -40,6 +40,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem?
     private var softwareUpdateMenuItem: NSMenuItem?
     private var accessibilityMenuItem: NSMenuItem?
+    private weak var aboutPanel: NSPanel?
     private var permissionMonitor: Timer?
     private var remainingPermissionChecks = 0
     private var snapshotTask: Task<Void, Never>?
@@ -281,9 +282,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.autoenablesItems = false
         menu.delegate = self
         menu.addItem(
-            withTitle: "Settings…",
-            action: #selector(showSettings),
-            keyEquivalent: ","
+            withTitle: "About Ruf",
+            action: #selector(showAbout),
+            keyEquivalent: ""
         ).target = self
         let softwareUpdateMenuItem = menu.addItem(
             withTitle: "Check for Updates…",
@@ -293,6 +294,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             keyEquivalent: ""
         )
         softwareUpdateMenuItem.target = softwareUpdateController
+        menu.addItem(.separator())
+        menu.addItem(
+            withTitle: "Settings…",
+            action: #selector(showSettings),
+            keyEquivalent: ","
+        ).target = self
         let accessibilityMenuItem = menu.addItem(
             withTitle: "Enable Accessibility…",
             action: #selector(enableAccessibility),
@@ -452,6 +459,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         @unknown default:
             return
         }
+    }
+
+    @objc
+    private func showAbout() {
+        let existingWindowIdentifiers = Set(
+            NSApp.windows.map(ObjectIdentifier.init)
+        )
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.alignment = .center
+        let credits = NSAttributedString(
+            string: "GitHub",
+            attributes: [
+                .link: "https://github.com/Q1CHENL/Ruf",
+                .paragraphStyle: paragraphStyle,
+            ]
+        )
+
+        NSApp.activate()
+        NSApp.orderFrontStandardAboutPanel(
+            options: [
+                .version: "",
+                .credits: credits,
+            ]
+        )
+
+        if aboutPanel == nil {
+            aboutPanel = NSApp.windows.first { window in
+                window is NSPanel
+                    && !existingWindowIdentifiers.contains(
+                        ObjectIdentifier(window)
+                    )
+            } as? NSPanel
+        }
+
+        aboutPanel?.makeKeyAndOrderFront(nil)
+        let closeButton = aboutPanel?
+            .standardWindowButton(.closeButton)
+        closeButton?.keyEquivalent = "w"
+        closeButton?.keyEquivalentModifierMask = .command
     }
 
     @objc
