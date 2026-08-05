@@ -1,3 +1,5 @@
+import RufCore
+
 enum SwitchTargetKind {
     case application
     case window(ApplicationWindow)
@@ -8,6 +10,7 @@ enum SwitchTargetKind {
 struct SwitchTarget {
     let item: ApplicationItem
     let kind: SwitchTargetKind
+    let dockBadge: DockBadge?
 
     var title: String {
         guard case let .window(window) = kind else {
@@ -34,13 +37,21 @@ struct SwitchTarget {
     }
 
     var accessibilityLabel: String {
+        let targetLabel: String
+
         switch kind {
         case .application:
-            return item.name
+            targetLabel = item.name
         case let .window(window):
-            return "\(item.name), \(window.title)"
+            targetLabel = "\(item.name), \(window.title)"
         case .reopenApplication:
-            return "Reopen \(item.name)"
+            targetLabel = "Reopen \(item.name)"
         }
+
+        guard let dockBadge else {
+            return targetLabel
+        }
+
+        return "\(targetLabel), Dock badge \(dockBadge.accessibilityLabel)"
     }
 }

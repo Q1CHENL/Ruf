@@ -179,14 +179,16 @@ enum ApplicationWindowService {
     private static func menuBar(
         from applicationElement: AXUIElement
     ) -> MenuBarQueryResult {
-        guard let applicationValues = values(
+        guard let applicationValues = AXElementReader.values(
             of: [kAXMenuBarAttribute],
             from: applicationElement
         ) else {
             return .incomplete
         }
 
-        if let menuBar: AXUIElement = decoded(applicationValues[0]) {
+        if let menuBar: AXUIElement = AXElementReader.decoded(
+            applicationValues[0]
+        ) {
             return .found(menuBar)
         }
 
@@ -222,7 +224,7 @@ enum ApplicationWindowService {
             index += 1
             AXUIElementSetMessagingTimeout(element, menuMessageTimeout)
 
-            guard let menuValues = values(
+            guard let menuValues = AXElementReader.values(
                 of: [
                     kAXRoleAttribute,
                     kAXTitleAttribute,
@@ -239,9 +241,9 @@ enum ApplicationWindowService {
                 wasIncomplete = true
             }
 
-            let role: String? = decoded(menuValues[0])
-            let title: String? = decoded(menuValues[1])
-            let isEnabled: Bool = decoded(menuValues[2]) ?? false
+            let role: String? = AXElementReader.decoded(menuValues[0])
+            let title: String? = AXElementReader.decoded(menuValues[1])
+            let isEnabled: Bool = AXElementReader.decoded(menuValues[2]) ?? false
             guard let children = menuChildren(from: menuValues[3]) else {
                 wasIncomplete = true
                 continue
@@ -266,7 +268,7 @@ enum ApplicationWindowService {
                 && title.map(NewWindowMenuTitleMatcher.matches) != true
 
             if requiresShortcutMatch {
-                guard let commandValues = values(
+                guard let commandValues = AXElementReader.values(
                     of: [
                         kAXMenuItemCmdCharAttribute,
                         kAXMenuItemCmdModifiersAttribute,
@@ -281,8 +283,10 @@ enum ApplicationWindowService {
                     wasIncomplete = true
                 }
 
-                commandCharacter = decoded(commandValues[0])
-                let modifierNumber: NSNumber? = decoded(commandValues[1])
+                commandCharacter = AXElementReader.decoded(commandValues[0])
+                let modifierNumber: NSNumber? = AXElementReader.decoded(
+                    commandValues[1]
+                )
                 commandModifiers = modifierNumber?.uint32Value
             }
 
@@ -489,7 +493,7 @@ enum ApplicationWindowService {
         let applicationElement = AXUIElementCreateApplication(processIdentifier)
         AXUIElementSetMessagingTimeout(applicationElement, messageTimeout)
 
-        guard let applicationValues = values(
+        guard let applicationValues = AXElementReader.values(
             of: [kAXWindowsAttribute, kAXFocusedWindowAttribute],
             from: applicationElement
         ), DispatchTime.now() < deadline,
@@ -497,7 +501,9 @@ enum ApplicationWindowService {
             return nil
         }
 
-        let focusedWindow: AXUIElement? = decoded(applicationValues[1])
+        let focusedWindow: AXUIElement? = AXElementReader.decoded(
+            applicationValues[1]
+        )
         var windows: [ApplicationWindow] = []
 
         for element in elements {
@@ -507,7 +513,7 @@ enum ApplicationWindowService {
             }
 
             AXUIElementSetMessagingTimeout(element, messageTimeout)
-            guard let windowValues = values(
+            guard let windowValues = AXElementReader.values(
                 of: [
                     kAXSubroleAttribute,
                     kAXMinimizedAttribute,
@@ -518,9 +524,9 @@ enum ApplicationWindowService {
                 continue
             }
 
-            let subrole: String? = decoded(windowValues[0])
-            let isMinimized: Bool = decoded(windowValues[1]) ?? false
-            let title: String? = decoded(windowValues[2])
+            let subrole: String? = AXElementReader.decoded(windowValues[0])
+            let isMinimized: Bool = AXElementReader.decoded(windowValues[1]) ?? false
+            let title: String? = AXElementReader.decoded(windowValues[2])
             guard
                 let subrole,
                 subrole == kAXStandardWindowSubrole
@@ -568,39 +574,10 @@ enum ApplicationWindowService {
         )
     }
 
-    private static func values(
-        of attributes: [String],
-        from element: AXUIElement
-    ) -> [Any]? {
-        var rawValues: CFArray?
-        guard AXUIElementCopyMultipleAttributeValues(
-            element,
-            attributes as CFArray,
-            [],
-            &rawValues
-        ) == .success,
-              let rawValues,
-              let values = rawValues as? [Any],
-              values.count == attributes.count else {
-            return nil
-        }
-
-        return values
-    }
-
-    private static func decoded<Value>(_ value: Any) -> Value? {
-        let rawValue = value as CFTypeRef
-        guard CFGetTypeID(rawValue) != AXValueGetTypeID() else {
-            return nil
-        }
-
-        return rawValue as? Value
-    }
-
     private static func menuChildren(
         from value: Any
     ) -> [AXUIElement]? {
-        if let children: [AXUIElement] = decoded(value) {
+        if let children: [AXUIElement] = AXElementReader.decoded(value) {
             return children
         }
 

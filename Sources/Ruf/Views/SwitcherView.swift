@@ -10,6 +10,8 @@ enum SwitcherMetrics {
     static let selectionRingSize = iconPlateSize + 2 * selectionRingWidth
     static let selectionRingCornerRadius = iconCornerRadius + selectionRingWidth
     static let reopenBadgeSize: CGFloat = 15
+    static let dockBadgeHeight: CGFloat = 15
+    static let dockBadgeDotSize: CGFloat = 9
     static let horizontalSpacing: CGFloat = 4
     static let verticalSpacing: CGFloat = 4
     static let containerInset: CGFloat = 12
@@ -93,7 +95,7 @@ private struct SwitchTargetCell: View {
                                 )
                         }
                     }
-                    .overlay(alignment: .topTrailing) {
+                    .overlay(alignment: .topLeading) {
                         if target.showsReopenBadge {
                             ZStack {
                                 Circle()
@@ -110,6 +112,11 @@ private struct SwitchTargetCell: View {
                             .accessibilityHidden(true)
                         }
                     }
+                    .overlay(alignment: .topTrailing) {
+                        if let dockBadge = target.dockBadge {
+                            DockBadgeView(badge: dockBadge)
+                        }
+                    }
 
                 SwitchTargetLabel(
                     title: target.title,
@@ -124,6 +131,39 @@ private struct SwitchTargetCell: View {
         .zIndex(isSelected ? 1 : 0)
         .accessibilityLabel(target.accessibilityLabel)
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+    }
+}
+
+private struct DockBadgeView: View {
+    let badge: DockBadge
+
+    var body: some View {
+        Group {
+            if let displayText = badge.displayText {
+                Text(displayText)
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .padding(.horizontal, 4)
+                    .frame(
+                        minWidth: SwitcherMetrics.dockBadgeHeight,
+                        minHeight: SwitcherMetrics.dockBadgeHeight
+                    )
+                    .background {
+                        Capsule()
+                            .fill(Color(nsColor: .systemRed))
+                    }
+            } else {
+                Circle()
+                    .fill(Color(nsColor: .systemRed))
+                    .frame(
+                        width: SwitcherMetrics.dockBadgeDotSize,
+                        height: SwitcherMetrics.dockBadgeDotSize
+                    )
+            }
+        }
+        .shadow(color: .black.opacity(0.25), radius: 1, y: 1)
+        .accessibilityHidden(true)
     }
 }
 

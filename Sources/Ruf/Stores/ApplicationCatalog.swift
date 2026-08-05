@@ -31,22 +31,45 @@ final class ApplicationCatalog: NSObject {
 
     func snapshot() async -> [SwitchTarget] {
         let applications = applicationSnapshot()
-        let windowStates = await ApplicationWindowService.states(
+        async let windowStatesQuery = ApplicationWindowService.states(
             for: applications.map(\.application.processIdentifier)
+        )
+        async let dockBadgesQuery = DockBadgeService.badges()
+        let (windowStates, dockBadges) = await (
+            windowStatesQuery,
+            dockBadgesQuery
         )
 
         return applications.flatMap { item -> [SwitchTarget] in
+            let dockBadge = item.application.bundleURL.flatMap {
+                dockBadges[$0.standardizedFileURL]
+            }
+
             switch windowStates[item.application.processIdentifier] {
             case .windowless?:
                 return [
-                    SwitchTarget(item: item, kind: .reopenApplication),
+                    SwitchTarget(
+                        item: item,
+                        kind: .reopenApplication,
+                        dockBadge: dockBadge
+                    ),
                 ]
             case let .windows(windows)?:
                 return windows.map { window in
-                    SwitchTarget(item: item, kind: .window(window))
+                    SwitchTarget(
+                        item: item,
+                        kind: .window(window),
+                        dockBadge: dockBadge
+                    )
                 }
             case nil:
-                return [SwitchTarget(item: item, kind: .application)]
+                return [
+                    SwitchTarget(
+                        item: item,
+                        kind: .application,
+                        dockBadge: dockBadge
+                    ),
+                ]
             }
         }
     }

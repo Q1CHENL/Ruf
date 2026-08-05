@@ -352,7 +352,7 @@ final class FocusedWindowMover: NSObject {
         let window = rawWindow as! AXUIElement
         AXUIElementSetMessagingTimeout(window, Self.messagingTimeout)
 
-        guard let values = values(
+        guard let values = AXElementReader.values(
             of: [
                 kAXRoleAttribute,
                 kAXSubroleAttribute,
@@ -425,25 +425,6 @@ final class FocusedWindowMover: NSObject {
             return nil
         }
         return value
-    }
-
-    private func values(
-        of attributes: [String],
-        from element: AXUIElement
-    ) -> [Any]? {
-        var rawValues: CFArray?
-        guard AXUIElementCopyMultipleAttributeValues(
-            element,
-            attributes as CFArray,
-            [],
-            &rawValues
-        ) == .success,
-              let rawValues,
-              let values = rawValues as? [Any],
-              values.count == attributes.count else {
-            return nil
-        }
-        return values
     }
 
     private func point(from rawValue: Any) -> CGPoint? {
