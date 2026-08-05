@@ -5,13 +5,18 @@ enum AXElementReader {
         of attributes: [String],
         from element: AXUIElement
     ) -> [Any]? {
-        var rawValues: CFArray?
-        guard AXUIElementCopyMultipleAttributeValues(
-            element,
-            attributes as CFArray,
-            [],
-            &rawValues
-        ) == .success,
+        let (error, rawValues) = AXClientContext.withDefaultIdentity {
+            var rawValues: CFArray?
+            let error = AXUIElementCopyMultipleAttributeValues(
+                element,
+                attributes as CFArray,
+                [],
+                &rawValues
+            )
+            return (error, rawValues)
+        }
+
+        guard error == .success,
               let rawValues,
               let values = rawValues as? [Any],
               values.count == attributes.count else {

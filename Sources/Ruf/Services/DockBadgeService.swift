@@ -36,8 +36,10 @@ enum DockBadgeService {
         for dockProcessIdentifier: pid_t
     ) -> [URL: DockBadge] {
         let deadline = DispatchTime.now() + queryBudget
-        let dockElement = AXUIElementCreateApplication(dockProcessIdentifier)
-        AXUIElementSetMessagingTimeout(dockElement, messageTimeout)
+        let dockElement = AXClientContext.applicationElement(
+            for: dockProcessIdentifier
+        )
+        AXClientContext.setMessagingTimeout(messageTimeout, for: dockElement)
 
         guard !Task.isCancelled,
               let rootValues = AXElementReader.values(
@@ -62,7 +64,7 @@ enum DockBadgeService {
                 break
             }
 
-            AXUIElementSetMessagingTimeout(dockItem, messageTimeout)
+            AXClientContext.setMessagingTimeout(messageTimeout, for: dockItem)
             guard let values = AXElementReader.values(
                 of: [
                     kAXSubroleAttribute,
@@ -103,7 +105,7 @@ enum DockBadgeService {
                 return nil
             }
 
-            AXUIElementSetMessagingTimeout(child, messageTimeout)
+            AXClientContext.setMessagingTimeout(messageTimeout, for: child)
             guard let values = AXElementReader.values(
                 of: [kAXRoleAttribute, kAXChildrenAttribute],
                 from: child

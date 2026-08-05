@@ -334,23 +334,28 @@ final class FocusedWindowMover: NSObject {
             return nil
         }
 
-        let applicationElement = AXUIElementCreateApplication(
-            application.processIdentifier
+        let applicationElement = AXClientContext.applicationElement(
+            for: application.processIdentifier
         )
-        AXUIElementSetMessagingTimeout(
-            applicationElement,
-            Self.messagingTimeout
+        AXClientContext.setMessagingTimeout(
+            Self.messagingTimeout,
+            for: applicationElement
         )
 
-        guard let rawWindow = attribute(
-            kAXFocusedWindowAttribute as CFString,
-            of: applicationElement
-        ), CFGetTypeID(rawWindow) == AXUIElementGetTypeID() else {
+        let focusedWindowAttribute = copyFocusedWindowAttribute(
+            from: applicationElement
+        )
+        guard focusedWindowAttribute.error == .success,
+              let rawWindow = focusedWindowAttribute.value,
+              CFGetTypeID(rawWindow) == AXUIElementGetTypeID() else {
             return nil
         }
 
         let window = rawWindow as! AXUIElement
-        AXUIElementSetMessagingTimeout(window, Self.messagingTimeout)
+        AXClientContext.setMessagingTimeout(
+            Self.messagingTimeout,
+            for: window
+        )
 
         guard let values = AXElementReader.values(
             of: [
@@ -378,6 +383,46 @@ final class FocusedWindowMover: NSObject {
             element: window,
             frame: CGRect(origin: position, size: size)
         )
+    }
+
+    private func copyFocusedWindowAttribute(
+        from application: AXUIElement
+    ) -> (value: CFTypeRef?, error: AXError) {
+        let initialAttribute = copyAttribute(
+            kAXFocusedWindowAttribute as CFString,
+            from: application
+        )
+        guard initialAttribute.error == .apiDisabled else {
+            return initialAttribute
+        }
+
+        return AXClientContext.withVoiceOverIdentity {
+            // Chromium app shims enable their per-app partial AX mode when a
+            // VoiceOver client queries the application's role.
+            _ = copyAttribute(
+                kAXRoleAttribute as CFString,
+                from: application
+            )
+            return copyAttribute(
+                kAXFocusedWindowAttribute as CFString,
+                from: application
+            )
+        } ?? initialAttribute
+    }
+
+    private func copyAttribute(
+        _ name: CFString,
+        from element: AXUIElement
+    ) -> (value: CFTypeRef?, error: AXError) {
+        AXClientContext.withDefaultIdentity {
+            var value: CFTypeRef?
+            let error = AXUIElementCopyAttributeValue(
+                element,
+                name,
+                &value
+            )
+            return (value, error)
+        }
     }
 
     private func screenSnapshots() -> [ScreenSnapshot] {
@@ -412,21 +457,6 @@ final class FocusedWindowMover: NSObject {
         )
     }
 
-    private func attribute(
-        _ attribute: CFString,
-        of element: AXUIElement
-    ) -> CFTypeRef? {
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(
-            element,
-            attribute,
-            &value
-        ) == .success else {
-            return nil
-        }
-        return value
-    }
-
     private func point(from rawValue: Any) -> CGPoint? {
         let rawValue = rawValue as CFTypeRef
         guard CFGetTypeID(rawValue) == AXValueGetTypeID() else {
@@ -458,16 +488,21 @@ final class FocusedWindowMover: NSObject {
     }
 
     private func isPositionSettable(of window: AXUIElement) -> Bool {
-        var isSettable = DarwinBoolean(false)
-        return AXUIElementIsAttributeSettable(
-            window,
-            kAXPositionAttribute as CFString,
-            &isSettable
-        ) == .success && isSettable.boolValue
+        AXClientContext.withDefaultIdentity {
+            var isSettable = DarwinBoolean(false)
+            return AXUIElementIsAttributeSettable(
+                window,
+                kAXPositionAttribute as CFString,
+                &isSettable
+            ) == .success && isSettable.boolValue
+        }
     }
 
     private func isFullScreen(_ window: AXUIElement) -> Bool {
-        attribute("AXFullScreen" as CFString, of: window) as? Bool == true
+        copyAttribute(
+            "AXFullScreen" as CFString,
+            from: window
+        ).value as? Bool == true
     }
 
     @discardableResult
@@ -480,11 +515,13 @@ final class FocusedWindowMover: NSObject {
             return false
         }
 
-        return AXUIElementSetAttributeValue(
-            window,
-            kAXPositionAttribute as CFString,
-            value
-        ) == .success
+        return AXClientContext.withDefaultIdentity {
+            AXUIElementSetAttributeValue(
+                window,
+                kAXPositionAttribute as CFString,
+                value
+            ) == .success
+        }
     }
 
     private func easeInOutCubic(_ progress: CGFloat) -> CGFloat {

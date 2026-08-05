@@ -63,20 +63,27 @@ enum ApplicationWindowService {
         in application: NSRunningApplication
     ) {
         if window.isMinimized {
-            AXUIElementSetAttributeValue(
-                window.element,
-                kAXMinimizedAttribute as CFString,
-                kCFBooleanFalse
-            )
+            _ = AXClientContext.withDefaultIdentity {
+                AXUIElementSetAttributeValue(
+                    window.element,
+                    kAXMinimizedAttribute as CFString,
+                    kCFBooleanFalse
+                )
+            }
         }
 
         application.activate()
-        AXUIElementSetAttributeValue(
-            window.element,
-            kAXMainAttribute as CFString,
-            kCFBooleanTrue
-        )
-        AXUIElementPerformAction(window.element, kAXRaiseAction as CFString)
+        AXClientContext.withDefaultIdentity {
+            _ = AXUIElementSetAttributeValue(
+                window.element,
+                kAXMainAttribute as CFString,
+                kCFBooleanTrue
+            )
+            _ = AXUIElementPerformAction(
+                window.element,
+                kAXRaiseAction as CFString
+            )
+        }
     }
 
     @MainActor
@@ -134,8 +141,13 @@ enum ApplicationWindowService {
             return .unavailable
         }
 
-        let applicationElement = AXUIElementCreateApplication(processIdentifier)
-        AXUIElementSetMessagingTimeout(applicationElement, menuMessageTimeout)
+        let applicationElement = AXClientContext.applicationElement(
+            for: processIdentifier
+        )
+        AXClientContext.setMessagingTimeout(
+            menuMessageTimeout,
+            for: applicationElement
+        )
         let deadline = DispatchTime.now() + menuQueryBudget
 
         while !Task.isCancelled {
@@ -222,7 +234,10 @@ enum ApplicationWindowService {
             let entry = elements[index]
             let element = entry.element
             index += 1
-            AXUIElementSetMessagingTimeout(element, menuMessageTimeout)
+            AXClientContext.setMessagingTimeout(
+                menuMessageTimeout,
+                for: element
+            )
 
             guard let menuValues = AXElementReader.values(
                 of: [
@@ -303,10 +318,12 @@ enum ApplicationWindowService {
                 guard !Task.isCancelled else {
                     return .noMatch
                 }
-                _ = AXUIElementPerformAction(
-                    element,
-                    kAXPressAction as CFString
-                )
+                AXClientContext.withDefaultIdentity {
+                    _ = AXUIElementPerformAction(
+                        element,
+                        kAXPressAction as CFString
+                    )
+                }
                 return .actionRequested
             }
 
@@ -490,8 +507,13 @@ enum ApplicationWindowService {
         plan: WindowQueryPlan,
         deadline: DispatchTime
     ) -> ApplicationWindowsQuery? {
-        let applicationElement = AXUIElementCreateApplication(processIdentifier)
-        AXUIElementSetMessagingTimeout(applicationElement, messageTimeout)
+        let applicationElement = AXClientContext.applicationElement(
+            for: processIdentifier
+        )
+        AXClientContext.setMessagingTimeout(
+            messageTimeout,
+            for: applicationElement
+        )
 
         guard let applicationValues = AXElementReader.values(
             of: [kAXWindowsAttribute, kAXFocusedWindowAttribute],
@@ -512,7 +534,7 @@ enum ApplicationWindowService {
                 break
             }
 
-            AXUIElementSetMessagingTimeout(element, messageTimeout)
+            AXClientContext.setMessagingTimeout(messageTimeout, for: element)
             guard let windowValues = AXElementReader.values(
                 of: [
                     kAXSubroleAttribute,

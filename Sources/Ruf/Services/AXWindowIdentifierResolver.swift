@@ -27,10 +27,10 @@ enum AXWindowIdentifierResolver {
         }
 
         var identifier = kCGNullWindowID
-        guard
-            getWindow(element, &identifier) == .success,
-            identifier != kCGNullWindowID
-        else {
+        let error = AXClientContext.withDefaultIdentity {
+            getWindow(element, &identifier)
+        }
+        guard error == .success, identifier != kCGNullWindowID else {
             return nil
         }
 
