@@ -15,12 +15,33 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Check shell and whitespace
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BASE_SHA: ${{ github.event.before }}
         run: |
           bash -n script/build_and_run.sh
-          empty_tree="$(git hash-object -t tree /dev/null)"
-          git diff --check "$empty_tree" HEAD
+          case "$EVENT_NAME" in
+            pull_request)
+              diff_base="$PR_BASE_SHA"
+              ;;
+            push)
+              if [[ "$PUSH_BASE_SHA" =~ ^0+$ ]]; then
+                diff_base="$(git merge-base HEAD "origin/$DEFAULT_BRANCH")"
+              else
+                diff_base="$PUSH_BASE_SHA"
+              fi
+              ;;
+            workflow_dispatch)
+              diff_base="HEAD^"
+              ;;
+          esac
+          git diff --check "$diff_base" HEAD
 
       - name: Build with strict warnings
         run: swift build -Xswiftc -warnings-as-errors
