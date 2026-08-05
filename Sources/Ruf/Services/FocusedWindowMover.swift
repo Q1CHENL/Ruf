@@ -16,6 +16,7 @@ final class FocusedWindowMover: NSObject {
     }
 
     private struct ActiveAnimation {
+        let identifier: UInt64
         let window: AXUIElement
         let startPosition: CGPoint
         let destinationFrame: CGRect
@@ -23,12 +24,46 @@ final class FocusedWindowMover: NSObject {
         let startTimestamp: CFTimeInterval
     }
 
+    private enum PositionWritePurpose: Sendable {
+        case frame(animationIdentifier: UInt64)
+        case animationCompletion(animationIdentifier: UInt64)
+        case placement
+
+        var animationIdentifier: UInt64? {
+            switch self {
+            case let .frame(animationIdentifier),
+                 let .animationCompletion(animationIdentifier):
+                animationIdentifier
+            case .placement:
+                nil
+            }
+        }
+    }
+
+    // AXUIElement is an immutable CF handle. The actual AX mutations below
+    // are serialized on positionWriter; Swift does not declare the handle
+    // Sendable even though Accessibility calls support cross-thread use.
+    private struct PositionWriteRequest: @unchecked Sendable {
+        let window: AXUIElement
+        let position: CGPoint
+        let purpose: PositionWritePurpose
+    }
+
     private static let animationDuration: CFTimeInterval = 0.2
     private static let messagingTimeout: Float = 0.05
 
     private let planner = WindowMovementPlanner()
+    private let positionWriter = DispatchQueue(
+        label: "com.qichen.ruf.window-position-writer",
+        qos: .userInteractive
+    )
     private var activeAnimation: ActiveAnimation?
     private var displayLink: CADisplayLink?
+    private var nextAnimationIdentifier: UInt64 = 0
+    private var positionWrites = CoalescingRequestQueue<
+        PositionWriteRequest,
+        UInt64
+    >()
 
     func move(_ direction: WindowMoveDirection) {
         guard AccessibilityPermission.isGranted else {
@@ -95,7 +130,13 @@ final class FocusedWindowMover: NSObject {
 
         if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             stopAnimation(.retargeted)
-            setPosition(plan.destinationFrame.origin, of: window.element)
+            enqueuePositionWrite(
+                PositionWriteRequest(
+                    window: window.element,
+                    position: plan.destinationFrame.origin,
+                    purpose: .placement
+                )
+            )
             return
         }
 
@@ -120,11 +161,19 @@ final class FocusedWindowMover: NSObject {
         stopAnimation(.retargeted)
 
         guard startPosition != destinationFrame.origin else {
-            setPosition(destinationFrame.origin, of: window)
+            enqueuePositionWrite(
+                PositionWriteRequest(
+                    window: window,
+                    position: destinationFrame.origin,
+                    purpose: .placement
+                )
+            )
             return
         }
 
+        nextAnimationIdentifier += 1
         activeAnimation = ActiveAnimation(
+            identifier: nextAnimationIdentifier,
             window: window,
             startPosition: startPosition,
             destinationFrame: destinationFrame,
@@ -167,13 +216,28 @@ final class FocusedWindowMover: NSObject {
                     * easedProgress
         )
 
-        guard setPosition(position, of: animation.window) else {
-            stopAnimation(.positionWriteFailed)
-            return
-        }
-
         if progress >= 1 {
-            stopAnimation(.completed)
+            displayLink.invalidate()
+            self.displayLink = nil
+            enqueuePositionWrite(
+                PositionWriteRequest(
+                    window: animation.window,
+                    position: destinationPosition,
+                    purpose: .animationCompletion(
+                        animationIdentifier: animation.identifier
+                    )
+                )
+            )
+        } else {
+            enqueuePositionWrite(
+                PositionWriteRequest(
+                    window: animation.window,
+                    position: position,
+                    purpose: .frame(
+                        animationIdentifier: animation.identifier
+                    )
+                )
+            )
         }
     }
 
@@ -183,11 +247,85 @@ final class FocusedWindowMover: NSObject {
         displayLink = nil
         activeAnimation = nil
 
-        if reason.settlesAtDestination, let animation {
-            setPosition(
-                animation.destinationFrame.origin,
-                of: animation.window
+        guard let animation else {
+            return
+        }
+
+        positionWrites.removePendingRequests(
+            coalescingKey: animation.identifier
+        )
+
+        guard reason.settlesAtDestination else {
+            return
+        }
+
+        if reason == .shutdown {
+            positionWriter.sync {
+                _ = Self.setPosition(
+                    animation.destinationFrame.origin,
+                    of: animation.window
+                )
+            }
+        } else {
+            enqueuePositionWrite(
+                PositionWriteRequest(
+                    window: animation.window,
+                    position: animation.destinationFrame.origin,
+                    purpose: .placement
+                )
             )
+        }
+    }
+
+    private func enqueuePositionWrite(_ request: PositionWriteRequest) {
+        guard let requestToStart = positionWrites.submit(
+            request,
+            coalescingKey: request.purpose.animationIdentifier
+        ) else {
+            return
+        }
+
+        startPositionWrite(requestToStart)
+    }
+
+    private func startPositionWrite(_ request: PositionWriteRequest) {
+        positionWriter.async { [weak self] in
+            let succeeded = Self.setPosition(
+                request.position,
+                of: request.window
+            )
+
+            DispatchQueue.main.async { [weak self] in
+                self?.positionWriteDidFinish(
+                    request,
+                    succeeded: succeeded
+                )
+            }
+        }
+    }
+
+    private func positionWriteDidFinish(
+        _ request: PositionWriteRequest,
+        succeeded: Bool
+    ) {
+        switch request.purpose {
+        case let .frame(animationIdentifier):
+            if !succeeded,
+               activeAnimation?.identifier == animationIdentifier {
+                stopAnimation(.positionWriteFailed)
+            }
+        case let .animationCompletion(animationIdentifier):
+            if activeAnimation?.identifier == animationIdentifier {
+                stopAnimation(
+                    succeeded ? .completed : .positionWriteFailed
+                )
+            }
+        case .placement:
+            break
+        }
+
+        if let nextRequest = positionWrites.completeCurrentRequest() {
+            startPositionWrite(nextRequest)
         }
     }
 
@@ -352,7 +490,7 @@ final class FocusedWindowMover: NSObject {
     }
 
     @discardableResult
-    private func setPosition(
+    nonisolated private static func setPosition(
         _ position: CGPoint,
         of window: AXUIElement
     ) -> Bool {
