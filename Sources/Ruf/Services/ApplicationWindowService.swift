@@ -44,10 +44,14 @@ enum ApplicationWindowService {
     private static let maximumMenuElementCount = 5_000
 
     static func states(
-        for processIdentifiers: [pid_t]
+        for processIdentifiers: [pid_t],
+        hiddenProcessIdentifiers: Set<pid_t>
     ) async -> [pid_t: ApplicationWindowState] {
         let queryTask = Task.detached(priority: .userInitiated) {
-            await queryStates(for: processIdentifiers)
+            await queryStates(
+                for: processIdentifiers,
+                hiddenProcessIdentifiers: hiddenProcessIdentifiers
+            )
         }
 
         return await withTaskCancellationHandler {
@@ -416,7 +420,8 @@ enum ApplicationWindowService {
     }
 
     private static func queryStates(
-        for processIdentifiers: [pid_t]
+        for processIdentifiers: [pid_t],
+        hiddenProcessIdentifiers: Set<pid_t>
     ) async -> [pid_t: ApplicationWindowState] {
         guard
             !Task.isCancelled,
@@ -450,6 +455,9 @@ enum ApplicationWindowService {
                 group.addTask {
                     queryState(
                         for: processIdentifier,
+                        isApplicationHidden: hiddenProcessIdentifiers.contains(
+                            processIdentifier
+                        ),
                         plan: plan,
                         deadline: deadline
                     )
@@ -476,6 +484,9 @@ enum ApplicationWindowService {
                 group.addTask {
                     queryState(
                         for: processIdentifier,
+                        isApplicationHidden: hiddenProcessIdentifiers.contains(
+                            processIdentifier
+                        ),
                         plan: plan,
                         deadline: deadline
                     )
@@ -488,6 +499,7 @@ enum ApplicationWindowService {
 
     private static func queryState(
         for processIdentifier: pid_t,
+        isApplicationHidden: Bool,
         plan: WindowQueryPlan,
         deadline: DispatchTime
     ) -> WindowStateQueryResult {
@@ -509,6 +521,7 @@ enum ApplicationWindowService {
             hasVisibleWindows: plan.hasVisibleWindows(
                 for: processIdentifier
             ),
+            isApplicationHidden: isApplicationHidden,
             switchableWindowMinimizedStates: query.windows.map(\.isMinimized)
         )
         let state: ApplicationWindowState?

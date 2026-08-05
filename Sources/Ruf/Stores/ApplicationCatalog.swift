@@ -31,8 +31,14 @@ final class ApplicationCatalog: NSObject {
 
     func snapshot() async -> [SwitchTarget] {
         let applications = applicationSnapshot()
+        let hiddenProcessIdentifiers = Set(
+            applications.lazy
+                .filter(\.application.isHidden)
+                .map(\.application.processIdentifier)
+        )
         async let windowStatesQuery = ApplicationWindowService.states(
-            for: applications.map(\.application.processIdentifier)
+            for: applications.map(\.application.processIdentifier),
+            hiddenProcessIdentifiers: hiddenProcessIdentifiers
         )
         async let dockBadgesQuery = DockBadgeService.badges()
         let (windowStates, dockBadges) = await (

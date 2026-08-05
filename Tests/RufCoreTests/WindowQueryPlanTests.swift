@@ -43,6 +43,7 @@ final class WindowQueryPlanTests: XCTestCase {
             WindowQueryDisposition.resolve(
                 hasSwitchableAXWindows: false,
                 hasVisibleWindows: false,
+                isApplicationHidden: false,
                 switchableWindowMinimizedStates: []
             ),
             .windowless
@@ -51,6 +52,7 @@ final class WindowQueryPlanTests: XCTestCase {
             WindowQueryDisposition.resolve(
                 hasSwitchableAXWindows: false,
                 hasVisibleWindows: true,
+                isApplicationHidden: false,
                 switchableWindowMinimizedStates: []
             ),
             .application
@@ -59,6 +61,7 @@ final class WindowQueryPlanTests: XCTestCase {
             WindowQueryDisposition.resolve(
                 hasSwitchableAXWindows: true,
                 hasVisibleWindows: false,
+                isApplicationHidden: false,
                 switchableWindowMinimizedStates: []
             ),
             .application
@@ -67,6 +70,7 @@ final class WindowQueryPlanTests: XCTestCase {
             WindowQueryDisposition.resolve(
                 hasSwitchableAXWindows: true,
                 hasVisibleWindows: true,
+                isApplicationHidden: false,
                 switchableWindowMinimizedStates: [false]
             ),
             .singleWindow
@@ -75,6 +79,7 @@ final class WindowQueryPlanTests: XCTestCase {
             WindowQueryDisposition.resolve(
                 hasSwitchableAXWindows: true,
                 hasVisibleWindows: false,
+                isApplicationHidden: false,
                 switchableWindowMinimizedStates: [true]
             ),
             .windows
@@ -83,9 +88,20 @@ final class WindowQueryPlanTests: XCTestCase {
             WindowQueryDisposition.resolve(
                 hasSwitchableAXWindows: true,
                 hasVisibleWindows: true,
+                isApplicationHidden: false,
                 switchableWindowMinimizedStates: [false, true]
             ),
             .windows
+        )
+
+        XCTAssertEqual(
+            WindowQueryDisposition.resolve(
+                hasSwitchableAXWindows: false,
+                hasVisibleWindows: false,
+                isApplicationHidden: true,
+                switchableWindowMinimizedStates: []
+            ),
+            .application
         )
     }
 }

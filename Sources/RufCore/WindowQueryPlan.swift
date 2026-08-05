@@ -7,6 +7,7 @@ public enum WindowQueryDisposition: Equatable, Sendable {
     public static func resolve(
         hasSwitchableAXWindows: Bool,
         hasVisibleWindows: Bool,
+        isApplicationHidden: Bool,
         switchableWindowMinimizedStates: [Bool]
     ) -> Self {
         if switchableWindowMinimizedStates == [false] {
@@ -18,7 +19,9 @@ public enum WindowQueryDisposition: Equatable, Sendable {
             return .windows
         }
 
-        return hasSwitchableAXWindows || hasVisibleWindows
+        return hasSwitchableAXWindows
+            || hasVisibleWindows
+            || isApplicationHidden
             ? .application
             : .windowless
     }
