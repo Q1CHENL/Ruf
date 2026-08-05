@@ -128,9 +128,6 @@ private struct SwitchTargetCell: View {
 }
 
 private struct SwitchTargetLabel: View {
-    private let windowTitleWidth = SwitcherMetrics.cellSize.width
-        + SwitcherMetrics.horizontalSpacing
-
     let title: String
     let isWindowTitle: Bool
     let isSelected: Bool
@@ -141,7 +138,7 @@ private struct SwitchTargetLabel: View {
                 Text(title)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                    .frame(width: windowTitleWidth)
+                    .frame(width: SwitcherMetrics.cellSize.width)
             } else {
                 Text(title)
                     .lineLimit(1)
