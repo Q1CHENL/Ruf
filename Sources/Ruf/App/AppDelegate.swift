@@ -43,7 +43,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var permissionMonitor: Timer?
     private var remainingPermissionChecks = 0
     private var snapshotTask: Task<Void, Never>?
-    private var pendingActions: [SwitcherAction] = []
+    private var loadingSession = SwitcherLoadingSession()
+    private var newWindowTask: Task<Void, Never>?
+    private var newWindowRequestID: UUID?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         enableLaunchAtLoginByDefaultIfNeeded()
@@ -71,6 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         snapshotTask?.cancel()
+        cancelNewWindowRequest()
         stopPermissionMonitoring()
         keyboardEventTap.stop()
         focusedWindowMover.stop()
@@ -86,13 +89,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func handleSwitcher(_ command: SwitcherAction) {
-        if snapshotTask != nil {
-            if case .cancel = command {
-                cancelSwitcher()
-            } else {
-                pendingActions.append(command)
-            }
+        switch loadingSession.receive(command) {
+        case .queued:
             return
+        case .cancelLoading:
+            cancelSwitcher()
+            return
+        case .handleImmediately:
+            break
         }
 
         switch command {
@@ -116,7 +120,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func loadTargets(backwards: Bool) {
-        pendingActions = []
+        cancelNewWindowRequest()
+        loadingSession.beginLoading()
         snapshotTask = Task { [weak self] in
             guard let self else {
                 return
@@ -136,9 +141,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         backwards: Bool
     ) {
         snapshotTask = nil
-        let actions = pendingActions
-        pendingActions = []
-        let replayPlan = SwitcherActionReplayPlan(pendingActions: actions)
+        let replayPlan = loadingSession.finishLoading()
 
         guard !targets.isEmpty else {
             keyboardEventTap.resetInputSession()
@@ -191,7 +194,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
 
-        Task { @MainActor in
+        cancelNewWindowRequest()
+        let requestID = UUID()
+        newWindowRequestID = requestID
+        newWindowTask = Task { @MainActor [weak self] in
+            guard let self else {
+                return
+            }
+
+            defer {
+                if newWindowRequestID == requestID {
+                    newWindowTask = nil
+                    newWindowRequestID = nil
+                }
+            }
+
             let application = target.item.application
             let shouldReopen: Bool
             if case .reopenApplication = target.kind {
@@ -200,9 +217,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 shouldReopen = false
             }
 
-            guard case .unavailable = await ApplicationWindowService.openNewWindow(
+            let result = await ApplicationWindowService.openNewWindow(
                 in: application
-            ) else {
+            )
+            guard !Task.isCancelled,
+                  case .unavailable = result else {
                 return
             }
 
@@ -212,6 +231,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 NSSound.beep()
             }
         }
+    }
+
+    private func cancelNewWindowRequest() {
+        newWindowTask?.cancel()
+        newWindowTask = nil
+        newWindowRequestID = nil
     }
 
     private func quitSelectedApplication() {
@@ -233,7 +258,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func cancelSwitcher() {
         snapshotTask?.cancel()
         snapshotTask = nil
-        pendingActions = []
+        loadingSession.cancelLoading()
         keyboardEventTap.resetInputSession()
         model.cancel()
         panelController.cancel()
@@ -328,7 +353,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func applySwitcherMode() {
         if preferences.switcherMode == .system,
-           model.isPresented || snapshotTask != nil {
+           model.isPresented || loadingSession.isLoading {
             cancelSwitcher()
         }
 

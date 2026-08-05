@@ -548,6 +548,39 @@ final class KeyboardInputSessionTests: XCTestCase {
         XCTAssertFalse(session.isCycling)
     }
 
+    func testPendingSwitcherGestureCancelsWithEscape() {
+        var session = cyclingSession()
+        _ = session.interpret(commandNInput(), capturesCommandTab: true)
+
+        let decision = session.interpret(
+            KeyboardInput(
+                kind: .keyDown,
+                keyCode: KeyboardKeyCode.escape,
+                modifiers: [.command],
+                isRepeat: false
+            ),
+            capturesCommandTab: true
+        )
+
+        XCTAssertEqual(decision, switcherDecision(.cancel))
+        XCTAssertFalse(session.isCycling)
+        XCTAssertFalse(session.hasPendingSwitcherGesture)
+    }
+
+    func testPendingSwitcherGestureCanBeCancelledByItsDeadline() {
+        var session = cyclingSession()
+        _ = session.interpret(commandNInput(), capturesCommandTab: true)
+
+        XCTAssertTrue(session.hasPendingSwitcherGesture)
+        XCTAssertEqual(
+            session.cancelPendingSwitcherGesture(),
+            .switcher(.cancel)
+        )
+        XCTAssertFalse(session.isCycling)
+        XCTAssertFalse(session.hasPendingSwitcherGesture)
+        XCTAssertNil(session.cancelPendingSwitcherGesture())
+    }
+
     func testSessionCancelsWhenTheEventTapIsInterrupted() {
         var session = cyclingSession()
 

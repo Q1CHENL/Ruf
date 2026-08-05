@@ -59,6 +59,7 @@ final class NewWindowMenuItemMatcherTests: XCTestCase {
                 isEnabled: true,
                 hasChildren: false,
                 isInsideNewWindowSubmenu: false,
+                isInsideFileMenu: false,
                 commandCharacter: nil,
                 commandModifiers: nil
             )
@@ -72,6 +73,7 @@ final class NewWindowMenuItemMatcherTests: XCTestCase {
                 isEnabled: true,
                 hasChildren: true,
                 isInsideNewWindowSubmenu: false,
+                isInsideFileMenu: false,
                 commandCharacter: nil,
                 commandModifiers: nil
             )
@@ -85,6 +87,7 @@ final class NewWindowMenuItemMatcherTests: XCTestCase {
                 isEnabled: true,
                 hasChildren: false,
                 isInsideNewWindowSubmenu: true,
+                isInsideFileMenu: false,
                 commandCharacter: "n",
                 commandModifiers: 0
             )
@@ -95,8 +98,35 @@ final class NewWindowMenuItemMatcherTests: XCTestCase {
                 isEnabled: true,
                 hasChildren: false,
                 isInsideNewWindowSubmenu: false,
+                isInsideFileMenu: false,
                 commandCharacter: "n",
                 commandModifiers: 0
+            )
+        )
+    }
+
+    func testMatchesUnmodifiedCommandNInsideTheFileMenuInAnyLocale() {
+        XCTAssertTrue(
+            NewWindowMenuItemMatcher.shouldPress(
+                title: "Nouvelle fenêtre",
+                isEnabled: true,
+                hasChildren: false,
+                isInsideNewWindowSubmenu: false,
+                isInsideFileMenu: true,
+                commandCharacter: "n",
+                commandModifiers: 0
+            )
+        )
+
+        XCTAssertFalse(
+            NewWindowMenuItemMatcher.shouldPress(
+                title: "Nouvelle fenêtre privée",
+                isEnabled: true,
+                hasChildren: false,
+                isInsideNewWindowSubmenu: false,
+                isInsideFileMenu: true,
+                commandCharacter: "n",
+                commandModifiers: 1
             )
         )
     }
@@ -108,6 +138,7 @@ final class NewWindowMenuItemMatcherTests: XCTestCase {
                 isEnabled: true,
                 hasChildren: false,
                 isInsideNewWindowSubmenu: true,
+                isInsideFileMenu: false,
                 commandCharacter: "n",
                 commandModifiers: 1
             )
@@ -118,6 +149,7 @@ final class NewWindowMenuItemMatcherTests: XCTestCase {
                 isEnabled: false,
                 hasChildren: false,
                 isInsideNewWindowSubmenu: true,
+                isInsideFileMenu: false,
                 commandCharacter: "n",
                 commandModifiers: 0
             )

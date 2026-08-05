@@ -5,9 +5,10 @@ import ApplicationServices
 struct ApplicationWindow: @unchecked Sendable {
     let element: AXUIElement
     let title: String
+    let isMinimized: Bool
 }
 
 enum ApplicationWindowState: Sendable {
     case windowless
-    case multiple([ApplicationWindow])
+    case windows([ApplicationWindow])
 }

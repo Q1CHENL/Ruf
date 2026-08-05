@@ -1,6 +1,26 @@
+public enum WindowQueryDisposition: Equatable, Sendable {
+    case application
+    case windowless
+    case windows
+
+    public static func resolve(
+        hasAXWindows: Bool,
+        hasVisibleWindows: Bool,
+        switchableWindowMinimizedStates: [Bool]
+    ) -> Self {
+        if switchableWindowMinimizedStates.count > 1
+            || switchableWindowMinimizedStates.contains(true) {
+            return .windows
+        }
+
+        return hasAXWindows || hasVisibleWindows
+            ? .application
+            : .windowless
+    }
+}
+
 public struct WindowQueryPlan: Equatable, Sendable {
-    public let multipleWindowCandidates: [Int32]
-    public let reopenCandidates: [Int32]
+    public let windowQueryCandidates: [Int32]
     private let visibleWindowIdentifiers: [Int32: Set<UInt32>]
 
     public init(
@@ -8,18 +28,26 @@ public struct WindowQueryPlan: Equatable, Sendable {
         visibleWindowIdentifiers: [Int32: Set<UInt32>]
     ) {
         self.visibleWindowIdentifiers = visibleWindowIdentifiers
-        multipleWindowCandidates = processIdentifiers.filter {
-            visibleWindowIdentifiers[$0, default: []].count > 1
-        }
-        reopenCandidates = processIdentifiers.filter {
-            visibleWindowIdentifiers[$0, default: []].isEmpty
-        }
+        windowQueryCandidates = processIdentifiers
     }
 
-    public func containsVisibleWindow(
-        identifier: UInt32,
-        processIdentifier: Int32
+    public func shouldIncludeWindow(
+        identifier: UInt32?,
+        processIdentifier: Int32,
+        isMinimized: Bool
     ) -> Bool {
-        visibleWindowIdentifiers[processIdentifier]?.contains(identifier) == true
+        if isMinimized {
+            return true
+        }
+
+        guard let identifier else {
+            return false
+        }
+
+        return visibleWindowIdentifiers[processIdentifier]?.contains(identifier) == true
+    }
+
+    public func hasVisibleWindows(for processIdentifier: Int32) -> Bool {
+        visibleWindowIdentifiers[processIdentifier]?.isEmpty == false
     }
 }

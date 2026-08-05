@@ -13,7 +13,7 @@ enum ApplicationActivation {
     }
 
     @MainActor
-    private final class Waiter: @unchecked Sendable {
+    private final class Waiter {
         private let application: NSRunningApplication
         private let notificationCenter = NSWorkspace.shared.notificationCenter
         private var observer: NSObjectProtocol?

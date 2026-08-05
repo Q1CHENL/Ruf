@@ -29,6 +29,7 @@ public enum NewWindowMenuItemMatcher {
         isEnabled: Bool,
         hasChildren: Bool,
         isInsideNewWindowSubmenu: Bool,
+        isInsideFileMenu: Bool,
         commandCharacter: String?,
         commandModifiers: UInt32?
     ) -> Bool {
@@ -40,7 +41,7 @@ public enum NewWindowMenuItemMatcher {
             return true
         }
 
-        guard isInsideNewWindowSubmenu,
+        guard isInsideNewWindowSubmenu || isInsideFileMenu,
               commandModifiers == 0,
               let commandCharacter else {
             return false

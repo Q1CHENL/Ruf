@@ -41,7 +41,7 @@ final class ApplicationCatalog: NSObject {
                 return [
                     SwitchTarget(item: item, kind: .reopenApplication),
                 ]
-            case let .multiple(windows)?:
+            case let .windows(windows)?:
                 return windows.map { window in
                     SwitchTarget(item: item, kind: .window(window))
                 }

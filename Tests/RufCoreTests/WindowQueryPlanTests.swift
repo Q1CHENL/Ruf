@@ -2,7 +2,7 @@ import XCTest
 @testable import RufCore
 
 final class WindowQueryPlanTests: XCTestCase {
-    func testSeparatesMultipleWindowAndReopenCandidatesInInputOrder() {
+    func testQueriesEveryApplicationAndIncludesOnlyVisibleOrMinimizedWindows() {
         let visibleWindowIdentifiers: [Int32: Set<UInt32>] = [
             20: [201],
             30: [301, 302, 303],
@@ -14,19 +14,78 @@ final class WindowQueryPlanTests: XCTestCase {
             visibleWindowIdentifiers: visibleWindowIdentifiers
         )
 
-        XCTAssertEqual(plan.multipleWindowCandidates, [30, 50])
-        XCTAssertEqual(plan.reopenCandidates, [10, 40])
+        XCTAssertEqual(plan.windowQueryCandidates, [10, 20, 30, 40, 50])
         XCTAssertTrue(
-            plan.containsVisibleWindow(
+            plan.shouldIncludeWindow(
                 identifier: 302,
-                processIdentifier: 30
+                processIdentifier: 30,
+                isMinimized: false
             )
         )
         XCTAssertFalse(
-            plan.containsVisibleWindow(
+            plan.shouldIncludeWindow(
                 identifier: 399,
-                processIdentifier: 30
+                processIdentifier: 30,
+                isMinimized: false
             )
+        )
+        XCTAssertTrue(
+            plan.shouldIncludeWindow(
+                identifier: nil,
+                processIdentifier: 40,
+                isMinimized: true
+            )
+        )
+    }
+
+    func testChoosesApplicationWindowAndReopenTargetShapes() {
+        XCTAssertEqual(
+            WindowQueryDisposition.resolve(
+                hasAXWindows: false,
+                hasVisibleWindows: false,
+                switchableWindowMinimizedStates: []
+            ),
+            .windowless
+        )
+        XCTAssertEqual(
+            WindowQueryDisposition.resolve(
+                hasAXWindows: false,
+                hasVisibleWindows: true,
+                switchableWindowMinimizedStates: []
+            ),
+            .application
+        )
+        XCTAssertEqual(
+            WindowQueryDisposition.resolve(
+                hasAXWindows: true,
+                hasVisibleWindows: false,
+                switchableWindowMinimizedStates: []
+            ),
+            .application
+        )
+        XCTAssertEqual(
+            WindowQueryDisposition.resolve(
+                hasAXWindows: true,
+                hasVisibleWindows: true,
+                switchableWindowMinimizedStates: [false]
+            ),
+            .application
+        )
+        XCTAssertEqual(
+            WindowQueryDisposition.resolve(
+                hasAXWindows: true,
+                hasVisibleWindows: false,
+                switchableWindowMinimizedStates: [true]
+            ),
+            .windows
+        )
+        XCTAssertEqual(
+            WindowQueryDisposition.resolve(
+                hasAXWindows: true,
+                hasVisibleWindows: true,
+                switchableWindowMinimizedStates: [false, true]
+            ),
+            .windows
         )
     }
 }

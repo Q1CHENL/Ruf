@@ -86,6 +86,10 @@ public struct KeyboardInputSession: Sendable {
     public private(set) var isCycling = false
     private var pendingSwitcherGesture: PendingSwitcherGesture?
 
+    public var hasPendingSwitcherGesture: Bool {
+        pendingSwitcherGesture != nil
+    }
+
     public init() {}
 
     public mutating func interpret(
@@ -142,6 +146,15 @@ public struct KeyboardInputSession: Sendable {
         return .switcher(.cancel)
     }
 
+    public mutating func cancelPendingSwitcherGesture() -> KeyboardCommand? {
+        guard pendingSwitcherGesture != nil else {
+            return nil
+        }
+
+        reset()
+        return .switcher(.cancel)
+    }
+
     public mutating func reset() {
         isCycling = false
         pendingSwitcherGesture = nil
@@ -174,6 +187,15 @@ public struct KeyboardInputSession: Sendable {
         _ pendingGesture: PendingSwitcherGesture,
         with input: KeyboardInput
     ) -> KeyboardDecision {
+        if input.kind == .keyDown,
+           input.keyCode == KeyboardKeyCode.escape {
+            reset()
+            return KeyboardDecision(
+                command: .switcher(.cancel),
+                isConsumed: true
+            )
+        }
+
         var gesture = pendingGesture
 
         if input.kind == .keyUp,

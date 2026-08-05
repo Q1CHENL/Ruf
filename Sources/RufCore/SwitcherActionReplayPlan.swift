@@ -18,3 +18,48 @@ public struct SwitcherActionReplayPlan: Equatable, Sendable {
         afterPresentation = Array(pendingActions[presentationBoundary...])
     }
 }
+
+public enum SwitcherLoadingDisposition: Equatable, Sendable {
+    case handleImmediately
+    case queued
+    case cancelLoading
+}
+
+public struct SwitcherLoadingSession: Sendable {
+    public private(set) var isLoading = false
+    private var pendingActions: [SwitcherAction] = []
+
+    public init() {}
+
+    public mutating func beginLoading() {
+        isLoading = true
+        pendingActions = []
+    }
+
+    public mutating func receive(
+        _ action: SwitcherAction
+    ) -> SwitcherLoadingDisposition {
+        guard isLoading else {
+            return .handleImmediately
+        }
+
+        if case .cancel = action {
+            cancelLoading()
+            return .cancelLoading
+        }
+
+        pendingActions.append(action)
+        return .queued
+    }
+
+    public mutating func finishLoading() -> SwitcherActionReplayPlan {
+        let plan = SwitcherActionReplayPlan(pendingActions: pendingActions)
+        cancelLoading()
+        return plan
+    }
+
+    public mutating func cancelLoading() {
+        isLoading = false
+        pendingActions = []
+    }
+}

@@ -79,11 +79,14 @@ private func keyboardModifiers(
 
 @MainActor
 final class KeyboardEventTap {
+    private static let pendingGestureTimeout: Duration = .seconds(2)
+
     private let commandHandler: (KeyboardCommand) -> Void
 
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var inputSession = KeyboardInputSession()
+    private var pendingGestureTimeoutTask: Task<Void, Never>?
     private var capturesCommandTab: Bool
 
     fileprivate var isCycling: Bool {
@@ -150,6 +153,8 @@ final class KeyboardEventTap {
     }
 
     func resetInputSession() {
+        pendingGestureTimeoutTask?.cancel()
+        pendingGestureTimeoutTask = nil
         inputSession.reset()
     }
 
@@ -158,7 +163,7 @@ final class KeyboardEventTap {
             return
         }
 
-        inputSession.reset()
+        resetInputSession()
         self.capturesCommandTab = capturesCommandTab
     }
 
@@ -169,6 +174,7 @@ final class KeyboardEventTap {
 
         if let eventTap {
             CGEvent.tapEnable(tap: eventTap, enable: false)
+            CFMachPortInvalidate(eventTap)
         }
 
         runLoopSource = nil
@@ -190,6 +196,7 @@ final class KeyboardEventTap {
             if let action = inputSession.interrupt() {
                 enqueue(action)
             }
+            synchronizePendingGestureTimeout(wasPending: true)
             return false
         }
 
@@ -205,6 +212,7 @@ final class KeyboardEventTap {
             return false
         }
 
+        let wasPending = inputSession.hasPendingSwitcherGesture
         let decision = inputSession.interpret(
             KeyboardInput(
                 kind: kind,
@@ -215,12 +223,42 @@ final class KeyboardEventTap {
             ),
             capturesCommandTab: capturesCommandTab
         )
+        synchronizePendingGestureTimeout(wasPending: wasPending)
 
         if let command = decision.command {
             enqueue(command)
         }
 
         return decision.isConsumed
+    }
+
+    private func synchronizePendingGestureTimeout(wasPending: Bool) {
+        if inputSession.hasPendingSwitcherGesture {
+            guard !wasPending else {
+                return
+            }
+
+            pendingGestureTimeoutTask?.cancel()
+            pendingGestureTimeoutTask = Task { @MainActor [weak self] in
+                do {
+                    try await Task.sleep(for: Self.pendingGestureTimeout)
+                } catch {
+                    return
+                }
+
+                guard let self,
+                      let command = inputSession.cancelPendingSwitcherGesture()
+                else {
+                    return
+                }
+
+                pendingGestureTimeoutTask = nil
+                enqueue(command)
+            }
+        } else {
+            pendingGestureTimeoutTask?.cancel()
+            pendingGestureTimeoutTask = nil
+        }
     }
 
     private func enqueue(_ command: KeyboardCommand) {

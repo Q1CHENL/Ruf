@@ -12,6 +12,7 @@ enum ApplicationWindowService {
     private struct MenuTraversalEntry {
         let element: AXUIElement
         let isInsideNewWindowSubmenu: Bool
+        let isInsideFileMenu: Bool
     }
 
     private enum MenuBarQueryResult {
@@ -20,9 +21,21 @@ enum ApplicationWindowService {
         case noMatch
     }
 
+    private struct ApplicationWindowsQuery: Sendable {
+        let hasAXWindows: Bool
+        let windows: [ApplicationWindow]
+    }
+
+    private struct WindowStateQueryResult: Sendable {
+        let processIdentifier: pid_t
+        let state: ApplicationWindowState?
+    }
+
     private static let messageTimeout: Float = 0.075
     private static let totalQueryBudget = DispatchTimeInterval.milliseconds(250)
-    private static let reopenQueryBudget = DispatchTimeInterval.milliseconds(75)
+    // AX calls block in the target process. A small bounded pool prevents one
+    // busy app from consuming the whole snapshot without flooding the AX server.
+    private static let maximumConcurrentApplicationQueries = 4
     // AX has no menu-tree-ready notification. Incomplete reads are polled
     // within this bounded interaction budget; complete searches return early.
     private static let menuMessageTimeout: Float = 0.2
@@ -33,9 +46,15 @@ enum ApplicationWindowService {
     static func states(
         for processIdentifiers: [pid_t]
     ) async -> [pid_t: ApplicationWindowState] {
-        await Task.detached(priority: .userInitiated) {
-            queryStates(for: processIdentifiers)
-        }.value
+        let queryTask = Task.detached(priority: .userInitiated) {
+            await queryStates(for: processIdentifiers)
+        }
+
+        return await withTaskCancellationHandler {
+            await queryTask.value
+        } onCancel: {
+            queryTask.cancel()
+        }
     }
 
     @MainActor
@@ -43,6 +62,14 @@ enum ApplicationWindowService {
         _ window: ApplicationWindow,
         in application: NSRunningApplication
     ) {
+        if window.isMinimized {
+            AXUIElementSetAttributeValue(
+                window.element,
+                kAXMinimizedAttribute as CFString,
+                kCFBooleanFalse
+            )
+        }
+
         application.activate()
         AXUIElementSetAttributeValue(
             window.element,
@@ -84,12 +111,20 @@ enum ApplicationWindowService {
         guard await ApplicationActivation.activate(application) else {
             return .unavailable
         }
+        guard !Task.isCancelled else {
+            return .unavailable
+        }
 
         let processIdentifier = application.processIdentifier
-
-        return await Task.detached(priority: .userInitiated) {
+        let queryTask = Task.detached(priority: .userInitiated) {
             await pressNewWindowMenuItem(for: processIdentifier)
-        }.value
+        }
+
+        return await withTaskCancellationHandler {
+            await queryTask.value
+        } onCancel: {
+            queryTask.cancel()
+        }
     }
 
     private static func pressNewWindowMenuItem(
@@ -169,14 +204,16 @@ enum ApplicationWindowService {
         var elements = [
             MenuTraversalEntry(
                 element: menuBar,
-                isInsideNewWindowSubmenu: false
+                isInsideNewWindowSubmenu: false,
+                isInsideFileMenu: false
             ),
         ]
         var index = 0
         var wasIncomplete = false
 
         while index < elements.count {
-            guard DispatchTime.now() < deadline else {
+            guard !Task.isCancelled,
+                  DispatchTime.now() < deadline else {
                 return .incomplete
             }
 
@@ -222,7 +259,10 @@ enum ApplicationWindowService {
             let requiresShortcutMatch = isMenuItem
                 && isEnabled
                 && !hasChildren
-                && entry.isInsideNewWindowSubmenu
+                && (
+                    entry.isInsideNewWindowSubmenu
+                        || entry.isInsideFileMenu
+                )
                 && title.map(NewWindowMenuTitleMatcher.matches) != true
 
             if requiresShortcutMatch {
@@ -252,9 +292,13 @@ enum ApplicationWindowService {
                    isEnabled: isEnabled,
                    hasChildren: hasChildren,
                    isInsideNewWindowSubmenu: entry.isInsideNewWindowSubmenu,
+                   isInsideFileMenu: entry.isInsideFileMenu,
                    commandCharacter: commandCharacter,
                    commandModifiers: commandModifiers
                ) {
+                guard !Task.isCancelled else {
+                    return .noMatch
+                }
                 _ = AXUIElementPerformAction(
                     element,
                     kAXPressAction as CFString
@@ -264,15 +308,22 @@ enum ApplicationWindowService {
 
             let isInsideNewWindowSubmenu = entry.isInsideNewWindowSubmenu
                 || entersNewWindowSubmenu
+            let isMenuBar = role == kAXMenuBarRole
             let remainingCapacity = maximumMenuElementCount - elements.count
             if children.count > remainingCapacity {
                 wasIncomplete = true
             }
-            for child in children.prefix(remainingCapacity) {
+            for (childIndex, child) in children
+                .prefix(remainingCapacity)
+                .enumerated() {
                 elements.append(
                     MenuTraversalEntry(
                         element: child,
-                        isInsideNewWindowSubmenu: isInsideNewWindowSubmenu
+                        isInsideNewWindowSubmenu: isInsideNewWindowSubmenu,
+                        // AppKit reserves the first application menu item;
+                        // the standard File menu is the second top-level item.
+                        isInsideFileMenu: entry.isInsideFileMenu
+                            || (isMenuBar && childIndex == 1)
                     )
                 )
             }
@@ -283,8 +334,9 @@ enum ApplicationWindowService {
 
     private static func queryStates(
         for processIdentifiers: [pid_t]
-    ) -> [pid_t: ApplicationWindowState] {
+    ) async -> [pid_t: ApplicationWindowState] {
         guard
+            !Task.isCancelled,
             AccessibilityPermission.isGranted,
             let visibleWindowIdentifiers = visibleWindowIdentifiers()
         else {
@@ -296,57 +348,108 @@ enum ApplicationWindowService {
             processIdentifiers: processIdentifiers,
             visibleWindowIdentifiers: visibleWindowIdentifiers
         )
-        var states: [pid_t: ApplicationWindowState] = [:]
 
-        for processIdentifier in plan.multipleWindowCandidates {
-            guard DispatchTime.now() < deadline else {
-                break
-            }
-
-            let windows = windows(
-                for: processIdentifier,
-                plan: plan,
-                deadline: deadline
+        return await withTaskGroup(
+            of: WindowStateQueryResult.self
+        ) { group in
+            var candidates = plan.windowQueryCandidates.makeIterator()
+            let initialQueryCount = min(
+                maximumConcurrentApplicationQueries,
+                plan.windowQueryCandidates.count
             )
-            guard windows.count > 1 else {
-                continue
+
+            for _ in 0..<initialQueryCount {
+                guard !Task.isCancelled,
+                      let processIdentifier = candidates.next() else {
+                    break
+                }
+
+                group.addTask {
+                    queryState(
+                        for: processIdentifier,
+                        plan: plan,
+                        deadline: deadline
+                    )
+                }
             }
 
-            states[processIdentifier] = .multiple(windows)
+            var states: [pid_t: ApplicationWindowState] = [:]
+
+            while let result = await group.next() {
+                guard !Task.isCancelled else {
+                    group.cancelAll()
+                    continue
+                }
+
+                if let state = result.state {
+                    states[result.processIdentifier] = state
+                }
+
+                guard DispatchTime.now() < deadline,
+                      let processIdentifier = candidates.next() else {
+                    continue
+                }
+
+                group.addTask {
+                    queryState(
+                        for: processIdentifier,
+                        plan: plan,
+                        deadline: deadline
+                    )
+                }
+            }
+
+            return states
+        }
+    }
+
+    private static func queryState(
+        for processIdentifier: pid_t,
+        plan: WindowQueryPlan,
+        deadline: DispatchTime
+    ) -> WindowStateQueryResult {
+        guard !Task.isCancelled,
+              DispatchTime.now() < deadline,
+              let query = windows(
+                  for: processIdentifier,
+                  plan: plan,
+                  deadline: deadline
+              ) else {
+            return WindowStateQueryResult(
+                processIdentifier: processIdentifier,
+                state: nil
+            )
         }
 
-        // Window targets are the primary navigation feature. Reopen badges use
-        // only the remaining global budget, capped at one AX timeout interval.
-        let reopenDeadline = min(
-            deadline,
-            DispatchTime.now() + reopenQueryBudget
+        let disposition = WindowQueryDisposition.resolve(
+            hasAXWindows: query.hasAXWindows,
+            hasVisibleWindows: plan.hasVisibleWindows(
+                for: processIdentifier
+            ),
+            switchableWindowMinimizedStates: query.windows.map(\.isMinimized)
         )
+        let state: ApplicationWindowState?
 
-        for processIdentifier in plan.reopenCandidates {
-            guard DispatchTime.now() < reopenDeadline else {
-                break
-            }
-
-            // Only a successful empty AX window list is safe to badge as
-            // reopenable; another Space and query failures stay ordinary.
-            guard let hasWindows = hasWindows(
-                for: processIdentifier,
-                deadline: reopenDeadline
-            ), !hasWindows else {
-                continue
-            }
-
-            states[processIdentifier] = .windowless
+        switch disposition {
+        case .application:
+            state = nil
+        case .windowless:
+            state = .windowless
+        case .windows:
+            state = .windows(query.windows)
         }
 
-        return states
+        return WindowStateQueryResult(
+            processIdentifier: processIdentifier,
+            state: state
+        )
     }
 
     private static func visibleWindowIdentifiers() -> [pid_t: Set<CGWindowID>]? {
-        // One visible WindowServer window is already an ordinary app target.
-        // AX is only needed to distinguish zero windows from another Space,
-        // or to enumerate apps with multiple visible windows. The identifiers
-        // also reject ordered-out windows that remain in an app's AX list.
+        // AX is queried for every app so minimized windows can be recognized.
+        // These WindowServer identifiers remain authoritative for ordinary
+        // visible windows and reject other-Space, ordered-out, and ghost AX
+        // elements without hiding windows explicitly marked as minimized.
         let options: CGWindowListOption = [
             .optionOnScreenOnly,
             .excludeDesktopElements,
@@ -378,32 +481,11 @@ enum ApplicationWindowService {
         }
     }
 
-    private static func hasWindows(
-        for processIdentifier: pid_t,
-        deadline: DispatchTime
-    ) -> Bool? {
-        let applicationElement = AXUIElementCreateApplication(processIdentifier)
-        AXUIElementSetMessagingTimeout(applicationElement, messageTimeout)
-
-        guard
-            let applicationValues = values(
-                of: [kAXWindowsAttribute],
-                from: applicationElement
-            ),
-            DispatchTime.now() < deadline,
-            let elements = applicationValues[0] as? [AXUIElement]
-        else {
-            return nil
-        }
-
-        return !elements.isEmpty
-    }
-
     private static func windows(
         for processIdentifier: pid_t,
         plan: WindowQueryPlan,
         deadline: DispatchTime
-    ) -> [ApplicationWindow] {
+    ) -> ApplicationWindowsQuery? {
         let applicationElement = AXUIElementCreateApplication(processIdentifier)
         AXUIElementSetMessagingTimeout(applicationElement, messageTimeout)
 
@@ -412,30 +494,19 @@ enum ApplicationWindowService {
             from: applicationElement
         ), DispatchTime.now() < deadline,
            let elements = applicationValues[0] as? [AXUIElement] else {
-            return []
+            return nil
         }
 
         let focusedWindow: AXUIElement? = decoded(applicationValues[1])
         var windows: [ApplicationWindow] = []
 
         for element in elements {
-            guard DispatchTime.now() < deadline else {
-                return []
+            guard !Task.isCancelled,
+                  DispatchTime.now() < deadline else {
+                break
             }
 
             AXUIElementSetMessagingTimeout(element, messageTimeout)
-            guard
-                let windowIdentifier = AXWindowIdentifierResolver.identifier(
-                    for: element
-                ),
-                plan.containsVisibleWindow(
-                    identifier: windowIdentifier,
-                    processIdentifier: processIdentifier
-                )
-            else {
-                continue
-            }
-
             guard let windowValues = values(
                 of: [
                     kAXSubroleAttribute,
@@ -444,7 +515,7 @@ enum ApplicationWindowService {
                 ],
                 from: element
             ) else {
-                return []
+                continue
             }
 
             let subrole: String? = decoded(windowValues[0])
@@ -454,7 +525,6 @@ enum ApplicationWindowService {
                 let subrole,
                 subrole == kAXStandardWindowSubrole
                     || subrole == kAXDialogSubrole,
-                !isMinimized,
                 let title
             else {
                 continue
@@ -465,11 +535,24 @@ enum ApplicationWindowService {
                 continue
             }
 
-            windows.append(ApplicationWindow(element: element, title: trimmedTitle))
-        }
+            let windowIdentifier = isMinimized
+                ? nil
+                : AXWindowIdentifierResolver.identifier(for: element)
+            guard plan.shouldIncludeWindow(
+                identifier: windowIdentifier,
+                processIdentifier: processIdentifier,
+                isMinimized: isMinimized
+            ) else {
+                continue
+            }
 
-        guard DispatchTime.now() < deadline else {
-            return []
+            windows.append(
+                ApplicationWindow(
+                    element: element,
+                    title: trimmedTitle,
+                    isMinimized: isMinimized
+                )
+            )
         }
 
         if let focusedWindow,
@@ -479,7 +562,10 @@ enum ApplicationWindowService {
             windows.insert(windows.remove(at: focusedIndex), at: 0)
         }
 
-        return windows
+        return ApplicationWindowsQuery(
+            hasAXWindows: !elements.isEmpty,
+            windows: windows
+        )
     }
 
     private static func values(
