@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: macos-26
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check shell and whitespace
+        run: |
+          bash -n script/build_and_run.sh
+          empty_tree="$(git hash-object -t tree /dev/null)"
+          git diff --check "$empty_tree" HEAD
+
+      - name: Build with strict warnings
+        run: swift build -Xswiftc -warnings-as-errors
+
+      - name: Run tests with strict warnings
+        run: swift test -Xswiftc -warnings-as-errors
+
+      - name: Build local distribution-shaped artifacts
+        run: ./script/build_and_run.sh --package
+
+      - name: Validate app and disk image
+        run: |
+          codesign --verify --deep --strict --verbose=2 dist/Ruf.app
+          hdiutil verify dist/Ruf.dmg
+          architectures="$(lipo -archs dist/Ruf.app/Contents/MacOS/Ruf)"
+          [[ "$architectures" == *arm64* ]]
+          [[ "$architectures" == *x86_64* ]]
+          if ./script/build_and_run.sh --appcast; then
+            echo "Ad-hoc artifacts must not be accepted for an appcast" >&2
+            exit 1
+          fi

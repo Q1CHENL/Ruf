@@ -29,9 +29,32 @@ swift test
 ./script/build_and_run.sh
 ```
 
-To create an optimized universal release build without launching Ruf, run
-`./script/build_and_run.sh --package`. The app and disk image are written to
-`dist/Ruf.app` and `dist/Ruf.dmg`.
+To create an optimized universal build without launching Ruf, run
+`./script/build_and_run.sh --package`. This produces ad-hoc-signed local
+artifacts at `dist/Ruf.app` and `dist/Ruf.dmg`.
+
+Without a Developer ID, import the pinned self-signed Code Signing identity
+named `Ruf Release Code Signing` into the login Keychain. The release maintainer
+must back up its certificate and private key as a password-protected `.p12`
+outside the repository. Then run:
+
+```sh
+./script/build_and_run.sh --release-self-signed
+```
+
+This gives Ruf a stable identity across releases, but it does not satisfy
+Gatekeeper or support notarization. Users must explicitly allow Ruf on first
+launch. Moving from an older ad-hoc-signed release may also require granting
+Accessibility permission one final time.
+
+For standard public distribution, store a `notarytool` profile in Keychain,
+then run:
+
+```sh
+RUF_DEVELOPER_ID_APPLICATION="Developer ID Application: NAME (TEAM_ID)" \
+RUF_NOTARY_PROFILE="ruf-notary" \
+./script/build_and_run.sh --release-notarized
+```
 
 Generating the signed Sparkle feed is a separate release step:
 
@@ -39,6 +62,5 @@ Generating the signed Sparkle feed is a separate release step:
 ./script/build_and_run.sh --appcast
 ```
 
-This updates `dist/appcast.xml` from the existing release artifacts and may ask
-for access to the Sparkle signing key in Keychain. If signing fails or is
-interrupted, an existing appcast is left unchanged.
+This updates `dist/appcast.xml` from validated release artifacts and may ask for
+access to the Sparkle signing key in Keychain.
