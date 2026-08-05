@@ -113,17 +113,24 @@ require_notarized_release_environment() {
 
 sign_application_for_distribution() {
     local identity="$1"
-    local uses_secure_timestamp="$2"
+    local release_kind="$2"
     local sparkle_version="$SPARKLE_FRAMEWORK/Versions/B"
     local arguments=(
         --force
         --sign "$identity"
-        --options runtime
     )
 
-    if [[ "$uses_secure_timestamp" == true ]]; then
-        arguments+=(--timestamp)
-    fi
+    case "$release_kind" in
+        self-signed)
+            ;;
+        notarized)
+            arguments+=(--options runtime --timestamp)
+            ;;
+        *)
+            echo "Unknown release kind: $release_kind" >&2
+            return 2
+            ;;
+    esac
 
     /usr/bin/codesign "${arguments[@]}" \
         "$sparkle_version/XPCServices/Installer.xpc"
@@ -142,15 +149,23 @@ sign_application_for_distribution() {
 sign_disk_image() {
     local disk_image="$1"
     local identity="$2"
-    local uses_secure_timestamp="$3"
+    local release_kind="$3"
     local arguments=(
         --force
         --sign "$identity"
     )
 
-    if [[ "$uses_secure_timestamp" == true ]]; then
-        arguments+=(--timestamp)
-    fi
+    case "$release_kind" in
+        self-signed)
+            ;;
+        notarized)
+            arguments+=(--timestamp)
+            ;;
+        *)
+            echo "Unknown release kind: $release_kind" >&2
+            return 2
+            ;;
+    esac
 
     /usr/bin/codesign "${arguments[@]}" "$disk_image"
 }
@@ -219,10 +234,40 @@ release_signing_kind() {
     fi
 }
 
+verify_release_runtime_policy() {
+    local signing_kind="$1"
+    local signature_details
+    signature_details="$(
+        /usr/bin/codesign -d --verbose=4 "$APP_BUNDLE" 2>&1
+    )"
+
+    case "$signing_kind" in
+        self-signed)
+            if [[ "$signature_details" == *"(runtime)"* ]]; then
+                echo "Self-signed releases must not enable the hardened runtime" >&2
+                return 1
+            fi
+            ;;
+        developer-id)
+            if [[ "$signature_details" != *"(runtime)"* ]]; then
+                echo "Developer ID releases must enable the hardened runtime" >&2
+                return 1
+            fi
+            ;;
+        *)
+            echo "Unknown signing kind: $signing_kind" >&2
+            return 2
+            ;;
+    esac
+}
+
 verify_signed_release_artifacts() {
+    local signing_kind
+
     /usr/bin/codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
     /usr/bin/codesign --verify --verbose=2 "$APP_DISK_IMAGE"
-    release_signing_kind "$APP_BUNDLE" >/dev/null
+    signing_kind="$(release_signing_kind "$APP_BUNDLE")"
+    verify_release_runtime_policy "$signing_kind"
 }
 
 verify_notarized_release_artifacts() {
@@ -356,19 +401,16 @@ package_for_distribution() (
     local identity
     local release_directory
     local previous_app_bundle
-    local uses_secure_timestamp
     local previous_app_moved=false
     local new_app_published=false
 
     case "$release_kind" in
         self-signed)
             identity="$SELF_SIGNED_IDENTITY_SHA1"
-            uses_secure_timestamp=false
             require_codesigning_identity "$identity" "$SELF_SIGNED_IDENTITY_NAME"
             ;;
         notarized)
             identity="${RUF_DEVELOPER_ID_APPLICATION:-}"
-            uses_secure_timestamp=true
             require_notarized_release_environment
             ;;
         *)
@@ -409,12 +451,12 @@ package_for_distribution() (
     SPARKLE_FRAMEWORK="$APP_FRAMEWORKS/Sparkle.framework"
 
     assemble_app release "${UNIVERSAL_ARCHS[@]}"
-    sign_application_for_distribution "$identity" "$uses_secure_timestamp"
+    sign_application_for_distribution "$identity" "$release_kind"
     if [[ "$release_kind" == notarized ]]; then
         notarize_application
     fi
     create_disk_image
-    sign_disk_image "$APP_DISK_IMAGE" "$identity" "$uses_secure_timestamp"
+    sign_disk_image "$APP_DISK_IMAGE" "$identity" "$release_kind"
     if [[ "$release_kind" == notarized ]]; then
         notarize_disk_image "$APP_DISK_IMAGE"
         verify_notarized_release_artifacts
