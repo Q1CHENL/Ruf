@@ -14,16 +14,19 @@ struct SwitchTarget {
     let dockBadge: DockBadge?
 
     var title: String {
-        guard case let .window(window) = kind else {
+        guard case let .window(window) = kind,
+              let windowTitle = window.title else {
             return item.name
         }
 
-        return window.title
+        return windowTitle
     }
 
+    // A window Ruf could not read a title for is labelled with its
+    // application's name, which is laid out the same way an application cell is.
     var showsWindowTitle: Bool {
-        if case .window = kind {
-            return true
+        if case let .window(window) = kind {
+            return window.title != nil
         }
 
         return false
@@ -44,7 +47,7 @@ struct SwitchTarget {
         case .application, .applicationWindow:
             targetLabel = item.name
         case let .window(window):
-            targetLabel = "\(item.name), \(window.title)"
+            targetLabel = window.title.map { "\(item.name), \($0)" } ?? item.name
         case .reopenApplication:
             targetLabel = "Reopen \(item.name)"
         }

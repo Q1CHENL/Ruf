@@ -626,7 +626,6 @@ enum ApplicationWindowService {
         )
         var windows: [ApplicationWindow] = []
         var hasSwitchableAXWindows = false
-
         for element in elements {
             guard !Task.isCancelled,
                   DispatchTime.now() < deadline else {
@@ -651,17 +650,20 @@ enum ApplicationWindowService {
             guard
                 let subrole,
                 subrole == kAXStandardWindowSubrole
-                    || subrole == kAXDialogSubrole,
-                let title
+                    || subrole == kAXDialogSubrole
             else {
                 continue
             }
 
-            let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmedTitle.isEmpty else {
-                continue
-            }
+            // The subrole already establishes this is a window the user can be
+            // switched to. Its title only decides what the cell reads.
             hasSwitchableAXWindows = true
+            let trimmedTitle = title?.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            )
+            let displayTitle = trimmedTitle?.isEmpty == false
+                ? trimmedTitle
+                : nil
 
             let windowIdentifier = isMinimized
                 ? nil
@@ -677,7 +679,7 @@ enum ApplicationWindowService {
             windows.append(
                 ApplicationWindow(
                     element: element,
-                    title: trimmedTitle,
+                    title: displayTitle,
                     isMinimized: isMinimized
                 )
             )
