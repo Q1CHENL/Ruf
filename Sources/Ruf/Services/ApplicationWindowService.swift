@@ -423,14 +423,19 @@ enum ApplicationWindowService {
         for processIdentifiers: [pid_t],
         hiddenProcessIdentifiers: Set<pid_t>
     ) async -> [pid_t: ApplicationWindowState] {
-        guard
-            !Task.isCancelled,
-            AccessibilityPermission.isGranted,
-            let visibleWindowIdentifiers = visibleWindowIdentifiers()
-        else {
+        guard !Task.isCancelled, AccessibilityPermission.isGranted else {
             return [:]
         }
 
+        let windowListSpan = PerformanceLog.begin("ax.windowList")
+        let visibleWindowIdentifiers = visibleWindowIdentifiers()
+        PerformanceLog.end(windowListSpan)
+
+        guard let visibleWindowIdentifiers else {
+            return [:]
+        }
+
+        let querySpan = PerformanceLog.begin("ax.queryStates")
         let deadline = DispatchTime.now() + totalQueryBudget
         let plan = WindowQueryPlan(
             processIdentifiers: processIdentifiers,
@@ -441,6 +446,7 @@ enum ApplicationWindowService {
             of: WindowStateQueryResult.self
         ) { group in
             var candidates = plan.windowQueryCandidates.makeIterator()
+            var dispatchedCount = 0
             let initialQueryCount = min(
                 maximumConcurrentApplicationQueries,
                 plan.windowQueryCandidates.count
@@ -452,6 +458,7 @@ enum ApplicationWindowService {
                     break
                 }
 
+                dispatchedCount += 1
                 group.addTask {
                     queryState(
                         for: processIdentifier,
@@ -481,6 +488,7 @@ enum ApplicationWindowService {
                     continue
                 }
 
+                dispatchedCount += 1
                 group.addTask {
                     queryState(
                         for: processIdentifier,
@@ -493,6 +501,17 @@ enum ApplicationWindowService {
                 }
             }
 
+            // A candidate that was never dispatched, or that resolved to no
+            // state, is an application the switcher silently degrades to an
+            // app-level tile. That ratio is the signal the budget is too tight,
+            // not the elapsed time on its own.
+            PerformanceLog.end(
+                querySpan,
+                "candidates=\(plan.windowQueryCandidates.count) "
+                    + "dispatched=\(dispatchedCount) "
+                    + "resolved=\(states.count) "
+                    + "budgetExpired=\(DispatchTime.now() >= deadline)"
+            )
             return states
         }
     }

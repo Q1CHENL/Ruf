@@ -44,6 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var permissionMonitor: Timer?
     private var remainingPermissionChecks = 0
     private var snapshotTask: Task<Void, Never>?
+    private var openSpan: PerformanceLog.Span?
     private var loadingSession = SwitcherLoadingSession()
     private var newWindowTasks: [UUID: Task<Void, Never>] = [:]
 
@@ -121,6 +122,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func loadTargets(backwards: Bool) {
         loadingSession.beginLoading()
+        // Spans the whole gesture the user actually feels: the keyboard command
+        // that opens the switcher through to the panel reaching the screen.
+        openSpan = PerformanceLog.begin("switcher.open")
         snapshotTask = Task { [weak self] in
             guard let self else {
                 return
@@ -143,20 +147,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let replayPlan = loadingSession.finishLoading()
 
         guard !targets.isEmpty else {
+            endOpenSpan("aborted targets=0")
             keyboardEventTap.resetInputSession()
             return
         }
 
+        let beginSpan = PerformanceLog.begin("switcher.begin")
         model.begin(with: targets, backwards: backwards)
+        PerformanceLog.end(beginSpan)
 
         for action in replayPlan.beforePresentation {
             handleSwitcher(action)
             guard model.isPresented else {
+                openSpan = nil
                 return
             }
         }
 
         panelController.show(itemCount: targets.count)
+        endOpenSpan("targets=\(targets.count)")
 
         for action in replayPlan.afterPresentation {
             handleSwitcher(action)
@@ -255,9 +264,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return target
     }
 
+    private func endOpenSpan(_ detail: String) {
+        guard let openSpan else {
+            return
+        }
+
+        PerformanceLog.end(openSpan, detail)
+        self.openSpan = nil
+    }
+
     private func cancelSwitcher() {
         snapshotTask?.cancel()
         snapshotTask = nil
+        openSpan = nil
         loadingSession.cancelLoading()
         keyboardEventTap.resetInputSession()
         model.cancel()
