@@ -78,6 +78,7 @@ public struct KeyboardDecision: Equatable, Sendable {
 
 public struct KeyboardInputSession: Sendable {
     private struct PendingSwitcherGesture: Sendable {
+        let token: UInt64
         let triggerKeyCode: Int64
         let action: SwitcherAction
         var isTriggerKeyDown: Bool
@@ -85,9 +86,16 @@ public struct KeyboardInputSession: Sendable {
 
     public private(set) var isCycling = false
     private var pendingSwitcherGesture: PendingSwitcherGesture?
+    private var lastSwitcherGestureToken: UInt64 = 0
 
     public var hasPendingSwitcherGesture: Bool {
         pendingSwitcherGesture != nil
+    }
+
+    /// Identifies the pending gesture so a caller timing it out can tell one
+    /// gesture being replaced by another from the same gesture still waiting.
+    public var pendingSwitcherGestureToken: UInt64? {
+        pendingSwitcherGesture?.token
     }
 
     public init() {}
@@ -97,16 +105,24 @@ public struct KeyboardInputSession: Sendable {
         capturesCommandTab: Bool
     ) -> KeyboardDecision {
         if let pendingSwitcherGesture {
-            let decision = continueSwitcherGesture(
+            if let decision = continueSwitcherGesture(
                 pendingSwitcherGesture,
                 with: input
-            )
-            updateSession(for: decision)
-            return decision
+            ) {
+                updateSession(for: decision)
+                return decision
+            }
+
+            // The gesture waits for a key release that another key press says
+            // is no longer coming. Drop it and read this event normally so a
+            // stray Command-N cannot swallow the rest of the session.
+            self.pendingSwitcherGesture = nil
         }
 
         if let action = switcherGestureAction(for: input) {
+            lastSwitcherGestureToken += 1
             pendingSwitcherGesture = PendingSwitcherGesture(
+                token: lastSwitcherGestureToken,
                 triggerKeyCode: input.keyCode,
                 action: action,
                 isTriggerKeyDown: true
@@ -183,17 +199,15 @@ public struct KeyboardInputSession: Sendable {
         return nil
     }
 
+    /// Advances the pending gesture, or returns nil when `input` belongs to
+    /// the session rather than to the gesture.
     private mutating func continueSwitcherGesture(
         _ pendingGesture: PendingSwitcherGesture,
         with input: KeyboardInput
-    ) -> KeyboardDecision {
+    ) -> KeyboardDecision? {
         if input.kind == .keyDown,
-           input.keyCode == KeyboardKeyCode.escape {
-            reset()
-            return KeyboardDecision(
-                command: .switcher(.cancel),
-                isConsumed: true
-            )
+           input.keyCode != pendingGesture.triggerKeyCode {
+            return nil
         }
 
         var gesture = pendingGesture

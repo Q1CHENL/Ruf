@@ -188,6 +188,8 @@ final class KeyboardEventTap {
         isRepeat: Bool,
         characters: String?
     ) -> Bool {
+        let previousGestureToken = inputSession.pendingSwitcherGestureToken
+
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             if let eventTap {
                 CGEvent.tapEnable(tap: eventTap, enable: true)
@@ -196,7 +198,7 @@ final class KeyboardEventTap {
             if let action = inputSession.interrupt() {
                 enqueue(action)
             }
-            synchronizePendingGestureTimeout(wasPending: true)
+            synchronizePendingGestureTimeout(previousToken: previousGestureToken)
             return false
         }
 
@@ -212,7 +214,6 @@ final class KeyboardEventTap {
             return false
         }
 
-        let wasPending = inputSession.hasPendingSwitcherGesture
         let decision = inputSession.interpret(
             KeyboardInput(
                 kind: kind,
@@ -223,7 +224,7 @@ final class KeyboardEventTap {
             ),
             capturesCommandTab: capturesCommandTab
         )
-        synchronizePendingGestureTimeout(wasPending: wasPending)
+        synchronizePendingGestureTimeout(previousToken: previousGestureToken)
 
         if let command = decision.command {
             enqueue(command)
@@ -232,32 +233,35 @@ final class KeyboardEventTap {
         return decision.isConsumed
     }
 
-    private func synchronizePendingGestureTimeout(wasPending: Bool) {
-        if inputSession.hasPendingSwitcherGesture {
-            guard !wasPending else {
+    private func synchronizePendingGestureTimeout(previousToken: UInt64?) {
+        guard let token = inputSession.pendingSwitcherGestureToken else {
+            pendingGestureTimeoutTask?.cancel()
+            pendingGestureTimeoutTask = nil
+            return
+        }
+
+        // A gesture replaced mid-flight is a new one and earns a full window,
+        // so only an unchanged token keeps the timer already running.
+        guard token != previousToken else {
+            return
+        }
+
+        pendingGestureTimeoutTask?.cancel()
+        pendingGestureTimeoutTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(for: Self.pendingGestureTimeout)
+            } catch {
                 return
             }
 
-            pendingGestureTimeoutTask?.cancel()
-            pendingGestureTimeoutTask = Task { @MainActor [weak self] in
-                do {
-                    try await Task.sleep(for: Self.pendingGestureTimeout)
-                } catch {
-                    return
-                }
+            guard let self else {
+                return
+            }
 
-                guard let self,
-                      let command = inputSession.cancelPendingSwitcherGesture()
-                else {
-                    return
-                }
-
-                pendingGestureTimeoutTask = nil
+            pendingGestureTimeoutTask = nil
+            if let command = inputSession.cancelPendingSwitcherGesture() {
                 enqueue(command)
             }
-        } else {
-            pendingGestureTimeoutTask?.cancel()
-            pendingGestureTimeoutTask = nil
         }
     }
 

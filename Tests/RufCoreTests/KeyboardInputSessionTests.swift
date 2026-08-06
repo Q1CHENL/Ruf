@@ -3,6 +3,7 @@ import XCTest
 
 final class KeyboardInputSessionTests: XCTestCase {
     private let newWindowKeyCode: Int64 = 99
+    private let quitKeyCode: Int64 = 98
 
     func testCommandTabStartsForwardOrBackwardCycling() {
         var forwardSession = KeyboardInputSession()
@@ -581,6 +582,103 @@ final class KeyboardInputSessionTests: XCTestCase {
         XCTAssertNil(session.cancelPendingSwitcherGesture())
     }
 
+    func testPendingSwitcherGestureYieldsToSwitcherNavigation() {
+        var session = cyclingSession()
+        _ = session.interpret(commandNInput(), capturesCommandTab: true)
+
+        let decision = session.interpret(
+            KeyboardInput(
+                kind: .keyDown,
+                keyCode: KeyboardKeyCode.rightArrow,
+                modifiers: [.command],
+                isRepeat: false
+            ),
+            capturesCommandTab: true
+        )
+
+        XCTAssertEqual(decision, switcherDecision(.move(.right)))
+        XCTAssertTrue(session.isCycling)
+        XCTAssertFalse(session.hasPendingSwitcherGesture)
+    }
+
+    func testPendingSwitcherGestureYieldsToAnotherCycle() {
+        var session = cyclingSession()
+        _ = session.interpret(commandNInput(), capturesCommandTab: true)
+
+        let decision = session.interpret(
+            commandTabInput(),
+            capturesCommandTab: true
+        )
+
+        XCTAssertEqual(decision, switcherDecision(.cycle(backwards: false)))
+        XCTAssertTrue(session.isCycling)
+        XCTAssertFalse(session.hasPendingSwitcherGesture)
+    }
+
+    func testPendingSwitcherGestureIsReplacedByADifferentGesture() {
+        var session = cyclingSession()
+        _ = session.interpret(commandNInput(), capturesCommandTab: true)
+
+        XCTAssertEqual(
+            session.interpret(commandQInput(), capturesCommandTab: true),
+            KeyboardDecision(command: nil, isConsumed: true)
+        )
+        XCTAssertTrue(session.hasPendingSwitcherGesture)
+
+        _ = session.interpret(
+            KeyboardInput(
+                kind: .keyUp,
+                keyCode: quitKeyCode,
+                modifiers: [.command],
+                isRepeat: false
+            ),
+            capturesCommandTab: true
+        )
+
+        XCTAssertEqual(
+            session.interpret(
+                commandReleaseInput(),
+                capturesCommandTab: true
+            ),
+            switcherDecision(.quitApplication, isConsumed: false)
+        )
+        XCTAssertFalse(session.isCycling)
+    }
+
+    func testPendingSwitcherGestureSurvivesItsOwnKeyRepeat() {
+        var session = cyclingSession()
+        _ = session.interpret(commandNInput(), capturesCommandTab: true)
+
+        let decision = session.interpret(
+            commandNInput(isRepeat: true),
+            capturesCommandTab: true
+        )
+
+        XCTAssertEqual(
+            decision,
+            KeyboardDecision(command: nil, isConsumed: true)
+        )
+        XCTAssertTrue(session.hasPendingSwitcherGesture)
+
+        _ = session.interpret(
+            KeyboardInput(
+                kind: .keyUp,
+                keyCode: newWindowKeyCode,
+                modifiers: [.command],
+                isRepeat: false
+            ),
+            capturesCommandTab: true
+        )
+
+        XCTAssertEqual(
+            session.interpret(
+                commandReleaseInput(),
+                capturesCommandTab: true
+            ),
+            switcherDecision(.openNewWindow, isConsumed: false)
+        )
+    }
+
     func testSessionCancelsWhenTheEventTapIsInterrupted() {
         var session = cyclingSession()
 
@@ -614,6 +712,16 @@ final class KeyboardInputSessionTests: XCTestCase {
             modifiers: [.command],
             isRepeat: isRepeat,
             characters: "n"
+        )
+    }
+
+    private func commandQInput(isRepeat: Bool = false) -> KeyboardInput {
+        KeyboardInput(
+            kind: .keyDown,
+            keyCode: quitKeyCode,
+            modifiers: [.command],
+            isRepeat: isRepeat,
+            characters: "q"
         )
     }
 
