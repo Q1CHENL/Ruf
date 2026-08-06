@@ -28,15 +28,10 @@ public enum WindowQueryDisposition: Equatable, Sendable {
 }
 
 public struct WindowQueryPlan: Equatable, Sendable {
-    public let windowQueryCandidates: [Int32]
     private let visibleWindowIdentifiers: [Int32: Set<UInt32>]
 
-    public init(
-        processIdentifiers: [Int32],
-        visibleWindowIdentifiers: [Int32: Set<UInt32>]
-    ) {
+    public init(visibleWindowIdentifiers: [Int32: Set<UInt32>]) {
         self.visibleWindowIdentifiers = visibleWindowIdentifiers
-        windowQueryCandidates = processIdentifiers
     }
 
     public func shouldIncludeWindow(

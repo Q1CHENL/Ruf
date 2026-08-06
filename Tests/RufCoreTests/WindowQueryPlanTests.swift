@@ -2,7 +2,7 @@ import XCTest
 @testable import RufCore
 
 final class WindowQueryPlanTests: XCTestCase {
-    func testQueriesEveryApplicationAndIncludesOnlyVisibleOrMinimizedWindows() {
+    func testIncludesOnlyVisibleOrMinimizedWindows() {
         let visibleWindowIdentifiers: [Int32: Set<UInt32>] = [
             20: [201],
             30: [301, 302, 303],
@@ -10,11 +10,9 @@ final class WindowQueryPlanTests: XCTestCase {
             50: [501, 502],
         ]
         let plan = WindowQueryPlan(
-            processIdentifiers: [10, 20, 30, 40, 50],
             visibleWindowIdentifiers: visibleWindowIdentifiers
         )
 
-        XCTAssertEqual(plan.windowQueryCandidates, [10, 20, 30, 40, 50])
         XCTAssertTrue(
             plan.shouldIncludeWindow(
                 identifier: 302,

@@ -484,18 +484,17 @@ enum ApplicationWindowService {
         let querySpan = PerformanceLog.begin("ax.queryStates")
         let deadline = DispatchTime.now() + totalQueryBudget
         let plan = WindowQueryPlan(
-            processIdentifiers: processIdentifiers,
             visibleWindowIdentifiers: visibleWindowIdentifiers
         )
 
         return await withTaskGroup(
             of: WindowStateQueryResult.self
         ) { group in
-            var candidates = plan.windowQueryCandidates.makeIterator()
+            var candidates = processIdentifiers.makeIterator()
             var dispatchedCount = 0
             let initialQueryCount = min(
                 maximumConcurrentApplicationQueries,
-                plan.windowQueryCandidates.count
+                processIdentifiers.count
             )
 
             for _ in 0..<initialQueryCount {
@@ -553,7 +552,7 @@ enum ApplicationWindowService {
             // not the elapsed time on its own.
             PerformanceLog.end(
                 querySpan,
-                "candidates=\(plan.windowQueryCandidates.count) "
+                "candidates=\(processIdentifiers.count) "
                     + "dispatched=\(dispatchedCount) "
                     + "resolved=\(states.count) "
                     + "budgetExpired=\(DispatchTime.now() >= deadline)"
