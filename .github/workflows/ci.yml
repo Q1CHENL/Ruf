@@ -50,6 +50,8 @@ jobs:
         run: swift test -Xswiftc -warnings-as-errors
 
       - name: Build local distribution-shaped artifacts
+        env:
+          RUF_STRICT_WARNINGS: "1"
         run: ./script/build_and_run.sh --package
 
       - name: Validate app and disk image

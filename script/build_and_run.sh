@@ -370,6 +370,12 @@ assemble_app() {
 
     local build_arguments=(-c "$configuration" "$@")
 
+    # CI compiles the release configuration under the same warning policy as
+    # the debug build so a warning that only appears there still fails.
+    if [[ -n "${RUF_STRICT_WARNINGS:-}" ]]; then
+        build_arguments+=(-Xswiftc -warnings-as-errors)
+    fi
+
     swift build "${build_arguments[@]}"
 
     local build_directory
