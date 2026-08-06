@@ -426,6 +426,9 @@ package_for_distribution() (
             ;;
     esac
 
+    # The staging directory lives beside the artifacts, and a release from a
+    # fresh clone reaches this point before anything has created dist/.
+    mkdir -p "$DIST_DIR"
     release_directory="$(mktemp -d "$DIST_DIR/.release.XXXXXX")"
     previous_app_bundle="$release_directory/previous-$APP_NAME.app"
 
