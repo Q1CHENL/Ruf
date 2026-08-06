@@ -193,6 +193,27 @@ final class NewWindowMenuSearchDecisionTests: XCTestCase {
         )
     }
 
+    func testPressesDeferredFallbackOnceCoverageStopsChanging() {
+        XCTAssertTrue(
+            NewWindowMenuSearchDecision.shouldPressDeferredFallback(
+                hasFallback: true,
+                coverageRepeated: true
+            )
+        )
+        XCTAssertFalse(
+            NewWindowMenuSearchDecision.shouldPressDeferredFallback(
+                hasFallback: true,
+                coverageRepeated: false
+            )
+        )
+        XCTAssertFalse(
+            NewWindowMenuSearchDecision.shouldPressDeferredFallback(
+                hasFallback: false,
+                coverageRepeated: true
+            )
+        )
+    }
+
     func testRetriesOnlyIncompleteSearchesWhileTimeRemains() {
         XCTAssertTrue(
             NewWindowMenuSearchDecision.shouldRetry(

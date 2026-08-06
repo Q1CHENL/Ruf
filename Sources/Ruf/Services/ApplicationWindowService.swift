@@ -21,6 +21,14 @@ enum ApplicationWindowService {
         case noMatch
     }
 
+    // How much of a menu tree one traversal managed to read. Two identical
+    // readings mean the tree has stopped changing under it.
+    private struct MenuSearchCoverage: Equatable {
+        let visited: Int
+        let queued: Int
+        let wasIncomplete: Bool
+    }
+
     private struct ApplicationWindowsQuery: Sendable {
         let hasSwitchableAXWindows: Bool
         let windows: [ApplicationWindow]
@@ -154,13 +162,27 @@ enum ApplicationWindowService {
         )
         let deadline = DispatchTime.now() + menuQueryBudget
 
+        // The search defers a shortcut match while an incomplete read can still
+        // be retried, and falls back to it once the budget expires. That last
+        // attempt starts after the deadline and returns before traversing
+        // anything, so the match has to outlive the attempt that found it.
+        var shortcutFallback: AXUIElement?
+        var previousCoverage: MenuSearchCoverage?
+
         while !Task.isCancelled {
             let outcome: NewWindowMenuSearchOutcome
+            var coverage = MenuSearchCoverage(
+                visited: 0,
+                queued: 0,
+                wasIncomplete: true
+            )
             switch menuBar(from: applicationElement) {
             case let .found(menuBar):
                 outcome = searchNewWindowMenuItem(
                     in: menuBar,
-                    deadline: deadline
+                    deadline: deadline,
+                    shortcutFallback: &shortcutFallback,
+                    coverage: &coverage
                 )
             case .incomplete:
                 outcome = .incomplete
@@ -174,6 +196,18 @@ enum ApplicationWindowService {
             case .noMatch:
                 return .unavailable
             case .incomplete:
+                if NewWindowMenuSearchDecision.shouldPressDeferredFallback(
+                    hasFallback: shortcutFallback != nil,
+                    coverageRepeated: coverage == previousCoverage
+                ), let shortcutFallback {
+                    return requestNewWindowAction(
+                        on: shortcutFallback
+                    ) == .actionRequested
+                        ? .menuActionRequested
+                        : .unavailable
+                }
+
+                previousCoverage = coverage
                 guard NewWindowMenuSearchDecision.shouldRetry(
                     after: outcome,
                     hasTimeRemaining: DispatchTime.now() < deadline
@@ -217,7 +251,9 @@ enum ApplicationWindowService {
 
     private static func searchNewWindowMenuItem(
         in menuBar: AXUIElement,
-        deadline: DispatchTime
+        deadline: DispatchTime,
+        shortcutFallback: inout AXUIElement?,
+        coverage: inout MenuSearchCoverage
     ) -> NewWindowMenuSearchOutcome {
         var elements = [
             MenuTraversalEntry(
@@ -227,8 +263,14 @@ enum ApplicationWindowService {
             ),
         ]
         var index = 0
-        var shortcutFallback: AXUIElement?
         var wasIncomplete = false
+        defer {
+            coverage = MenuSearchCoverage(
+                visited: index,
+                queued: elements.count,
+                wasIncomplete: wasIncomplete
+            )
+        }
 
         while index < elements.count {
             guard !Task.isCancelled else {
@@ -329,6 +371,7 @@ enum ApplicationWindowService {
                 commandModifiers = modifierNumber?.uint32Value
             }
 
+
             let match = isMenuItem
                 ? NewWindowMenuItemMatcher.match(
                     title: title,
@@ -410,13 +453,16 @@ enum ApplicationWindowService {
             return .noMatch
         }
 
-        AXClientContext.withDefaultIdentity {
-            _ = AXUIElementPerformAction(
+        // The deferred match can be pressed a whole budget after it was found,
+        // by which point the menu may have been rebuilt. Reporting success
+        // without checking would turn that into a silently ignored request.
+        let error = AXClientContext.withDefaultIdentity {
+            AXUIElementPerformAction(
                 element,
                 kAXPressAction as CFString
             )
         }
-        return .actionRequested
+        return error == .success ? .actionRequested : .noMatch
     }
 
     private static func queryStates(
