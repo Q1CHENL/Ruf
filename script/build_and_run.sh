@@ -20,6 +20,7 @@ SPARKLE_FRAMEWORK="$APP_FRAMEWORKS/Sparkle.framework"
 SPARKLE_TOOLS="$ROOT_DIR/.build/artifacts/sparkle/Sparkle/bin"
 SPARKLE_KEY_ACCOUNT="$BUNDLE_ID"
 REPOSITORY_URL="https://github.com/Q1CHENL/Ruf"
+PERFORMANCE_LOG="$HOME/Library/Logs/$APP_NAME/performance.log"
 SELF_SIGNED_IDENTITY_NAME="Ruf Release Code Signing"
 SELF_SIGNED_IDENTITY_SHA1="979E44A42CA7D82F7C73198B826E5D469C4021A9"
 UNIVERSAL_ARCHS=(--arch arm64 --arch x86_64)
@@ -66,18 +67,24 @@ create_disk_image() {
 }
 
 sign_for_local_use() {
-    local identity="${RUF_LOCAL_CODESIGN_IDENTITY:--}"
-    local arguments=(
-        --force
-        --sign "$identity"
-        --identifier "$BUNDLE_ID"
-    )
+    # TCC stores the designated requirement, so signing with a stable identity
+    # lets an Accessibility approval survive rebuilds. An ad-hoc signature is
+    # identified by its code directory hash instead, which every build changes,
+    # revoking the approval. Fall back to ad-hoc where the identity is absent,
+    # such as CI. The hardened runtime stays off: self-signed bundles are not
+    # launchable with it.
+    local identity="${RUF_LOCAL_CODESIGN_IDENTITY:-$SELF_SIGNED_IDENTITY_SHA1}"
 
-    if [[ "$identity" != "-" ]]; then
-        arguments+=(--options runtime)
+    if [[ "$identity" != "-" ]] && ! /usr/bin/security find-identity \
+        -p codesigning -v | /usr/bin/grep -F "$identity" >/dev/null; then
+        identity="-"
     fi
 
-    /usr/bin/codesign "${arguments[@]}" "$APP_BUNDLE"
+    /usr/bin/codesign \
+        --force \
+        --sign "$identity" \
+        --identifier "$BUNDLE_ID" \
+        "$APP_BUNDLE"
     /usr/bin/codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
 }
 
@@ -517,8 +524,14 @@ case "$MODE" in
         /usr/bin/log stream --info --style compact --predicate "process == \"$APP_NAME\""
         ;;
     telemetry)
+        # Scope the opt-in to this session. The app reads the preference once at
+        # launch, so clearing it on exit disarms the next ordinary launch
+        # without disturbing the run being measured.
+        /usr/bin/defaults write "$BUNDLE_ID" RufPerformanceLogging -bool YES
+        trap '/usr/bin/defaults delete "$BUNDLE_ID" \
+            RufPerformanceLogging 2>/dev/null || true' EXIT
         launch_debug_app
-        /usr/bin/log stream --info --style compact --predicate "subsystem == \"$BUNDLE_ID\""
+        /usr/bin/tail -n 0 -F "$PERFORMANCE_LOG"
         ;;
     verify)
         launch_debug_app

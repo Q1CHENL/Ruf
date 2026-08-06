@@ -30,7 +30,11 @@ final class ApplicationCatalog: NSObject {
     }
 
     func snapshot() async -> [SwitchTarget] {
+        let snapshotSpan = PerformanceLog.begin("catalog.snapshot")
+        let applicationSpan = PerformanceLog.begin("catalog.applications")
         let applications = applicationSnapshot()
+        PerformanceLog.end(applicationSpan, "apps=\(applications.count)")
+
         let hiddenProcessIdentifiers = Set(
             applications.lazy
                 .filter(\.application.isHidden)
@@ -46,7 +50,7 @@ final class ApplicationCatalog: NSObject {
             dockBadgesQuery
         )
 
-        return applications.flatMap { item -> [SwitchTarget] in
+        let targets = applications.flatMap { item -> [SwitchTarget] in
             let dockBadge = item.application.bundleURL.flatMap {
                 dockBadges[$0.standardizedFileURL]
             }
@@ -86,6 +90,13 @@ final class ApplicationCatalog: NSObject {
                 ]
             }
         }
+
+        PerformanceLog.end(
+            snapshotSpan,
+            "apps=\(applications.count) badges=\(dockBadges.count) "
+                + "targets=\(targets.count)"
+        )
+        return targets
     }
 
     private func applicationSnapshot() -> [ApplicationItem] {
@@ -93,9 +104,14 @@ final class ApplicationCatalog: NSObject {
             recordActivation(frontmostApplication)
         }
 
+        let runningSpan = PerformanceLog.begin("catalog.runningApps")
+        let runningApplications = workspace.runningApplications
+        PerformanceLog.end(runningSpan, "running=\(runningApplications.count)")
+
+        let filterSpan = PerformanceLog.begin("catalog.filter")
         var itemsByBundleIdentifier: [String: ApplicationItem] = [:]
 
-        for application in workspace.runningApplications {
+        for application in runningApplications {
             guard
                 application.activationPolicy == .regular,
                 !application.isTerminated,
@@ -119,6 +135,13 @@ final class ApplicationCatalog: NSObject {
             }
 
             itemsByBundleIdentifier[bundleIdentifier] = item
+        }
+
+        PerformanceLog.end(filterSpan, "kept=\(itemsByBundleIdentifier.count)")
+
+        let sortSpan = PerformanceLog.begin("catalog.sort")
+        defer {
+            PerformanceLog.end(sortSpan)
         }
 
         let recentRanks = recentApplications.identifiers.enumerated().reduce(

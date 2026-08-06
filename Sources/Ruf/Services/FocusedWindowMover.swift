@@ -51,6 +51,7 @@ final class FocusedWindowMover: NSObject {
 
     private static let animationDuration: CFTimeInterval = 0.2
     private static let messagingTimeout: Float = 0.05
+    private static let fullScreenAttribute = "AXFullScreen"
 
     private let planner = WindowMovementPlanner()
     private let positionWriter = DispatchQueue(
@@ -357,12 +358,17 @@ final class FocusedWindowMover: NSObject {
             for: window
         )
 
+        // Full-screen state rides along with the geometry read. Windows that
+        // do not publish the attribute return an error entry instead, which
+        // fails the cast and reads as "not full screen" exactly as a separate
+        // unsupported-attribute request would.
         guard let values = AXElementReader.values(
             of: [
                 kAXRoleAttribute,
                 kAXSubroleAttribute,
                 kAXPositionAttribute,
                 kAXSizeAttribute,
+                Self.fullScreenAttribute,
             ],
             from: window
         ),
@@ -370,7 +376,7 @@ final class FocusedWindowMover: NSObject {
               role == kAXWindowRole,
               let subrole = values[1] as? String,
               subrole == kAXStandardWindowSubrole,
-              !isFullScreen(window),
+              values[4] as? Bool != true,
               isPositionSettable(of: window),
               let position = point(from: values[2]),
               let size = size(from: values[3]),
@@ -496,13 +502,6 @@ final class FocusedWindowMover: NSObject {
                 &isSettable
             ) == .success && isSettable.boolValue
         }
-    }
-
-    private func isFullScreen(_ window: AXUIElement) -> Bool {
-        copyAttribute(
-            "AXFullScreen" as CFString,
-            from: window
-        ).value as? Bool == true
     }
 
     @discardableResult

@@ -70,8 +70,14 @@ final class SwitcherPanelController {
     func show(itemCount: Int) {
         previouslyActiveApplication = NSWorkspace.shared.frontmostApplication
 
+        // Resizing forces the hosting view to lay the grid out, so the first
+        // SwiftUI evaluation of a new target list lands here rather than in
+        // the ordering call below.
+        let resizeSpan = PerformanceLog.begin("panel.resize")
         let size = resize(itemCount: itemCount)
+        PerformanceLog.end(resizeSpan, "items=\(itemCount)")
 
+        let originSpan = PerformanceLog.begin("panel.origin")
         let mouseLocation = NSEvent.mouseLocation
         let screen = NSScreen.screens.first { $0.frame.contains(mouseLocation) }
             ?? NSScreen.main
@@ -85,8 +91,11 @@ final class SwitcherPanelController {
                 )
             )
         }
+        PerformanceLog.end(originSpan)
 
+        let orderFrontSpan = PerformanceLog.begin("panel.orderFront")
         panel.makeKeyAndOrderFront(nil)
+        PerformanceLog.end(orderFrontSpan, "items=\(itemCount)")
 
         DispatchQueue.main.async { [weak self] in
             guard let self, self.panel.isVisible, !self.panel.isKeyWindow else {
@@ -110,9 +119,18 @@ final class SwitcherPanelController {
 
     @discardableResult
     private func resize(itemCount: Int) -> CGSize {
+        let metricsSpan = PerformanceLog.begin("panel.metrics")
         let size = SwitcherMetrics.panelSize(itemCount: itemCount)
+        PerformanceLog.end(metricsSpan)
+
+        let contentSizeSpan = PerformanceLog.begin("panel.setContentSize")
         panel.setContentSize(size)
+        PerformanceLog.end(contentSizeSpan)
+
+        let glassFrameSpan = PerformanceLog.begin("panel.glassFrame")
         glassView.frame = CGRect(origin: .zero, size: size)
+        PerformanceLog.end(glassFrameSpan)
+
         return size
     }
 }

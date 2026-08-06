@@ -35,6 +35,11 @@ enum DockBadgeService {
     private static func queryBadges(
         for dockProcessIdentifier: pid_t
     ) -> [URL: DockBadge] {
+        let badgeSpan = PerformanceLog.begin("ax.dockBadges")
+        defer {
+            PerformanceLog.end(badgeSpan)
+        }
+
         let deadline = DispatchTime.now() + queryBudget
         let dockElement = AXClientContext.applicationElement(
             for: dockProcessIdentifier
