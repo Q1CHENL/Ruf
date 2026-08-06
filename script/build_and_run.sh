@@ -66,18 +66,24 @@ create_disk_image() {
 }
 
 sign_for_local_use() {
-    local identity="${RUF_LOCAL_CODESIGN_IDENTITY:--}"
-    local arguments=(
-        --force
-        --sign "$identity"
-        --identifier "$BUNDLE_ID"
-    )
+    # TCC stores the designated requirement, so signing with a stable identity
+    # lets an Accessibility approval survive rebuilds. An ad-hoc signature is
+    # identified by its code directory hash instead, which every build changes,
+    # revoking the approval. Fall back to ad-hoc where the identity is absent,
+    # such as CI. The hardened runtime stays off: self-signed bundles are not
+    # launchable with it.
+    local identity="${RUF_LOCAL_CODESIGN_IDENTITY:-$SELF_SIGNED_IDENTITY_SHA1}"
 
-    if [[ "$identity" != "-" ]]; then
-        arguments+=(--options runtime)
+    if [[ "$identity" != "-" ]] && ! /usr/bin/security find-identity \
+        -p codesigning -v | /usr/bin/grep -F "$identity" >/dev/null; then
+        identity="-"
     fi
 
-    /usr/bin/codesign "${arguments[@]}" "$APP_BUNDLE"
+    /usr/bin/codesign \
+        --force \
+        --sign "$identity" \
+        --identifier "$BUNDLE_ID" \
+        "$APP_BUNDLE"
     /usr/bin/codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
 }
 
