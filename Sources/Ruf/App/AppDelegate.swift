@@ -159,7 +159,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for action in replayPlan.beforePresentation {
             handleSwitcher(action)
             guard model.isPresented else {
-                openSpan = nil
+                endOpenSpan("dismissed before presentation")
                 return
             }
         }
@@ -276,7 +276,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func cancelSwitcher() {
         snapshotTask?.cancel()
         snapshotTask = nil
-        openSpan = nil
+        endOpenSpan("cancelled")
         loadingSession.cancelLoading()
         keyboardEventTap.resetInputSession()
         model.cancel()
