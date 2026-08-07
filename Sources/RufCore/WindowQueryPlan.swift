@@ -8,6 +8,8 @@ public enum WindowQueryDisposition: Equatable, Sendable {
         hasSwitchableAXWindows: Bool,
         hasVisibleWindows: Bool,
         isApplicationHidden: Bool,
+        hasIncompleteWindowReads: Bool,
+        hasWindowsOnAnotherSpace: Bool,
         switchableWindowMinimizedStates: [Bool]
     ) -> Self {
         if switchableWindowMinimizedStates == [false] {
@@ -19,9 +21,19 @@ public enum WindowQueryDisposition: Equatable, Sendable {
             return .windows
         }
 
+        // Only a window scan that ran to completion can prove an application
+        // has nothing to switch to. A read that timed out or came back with a
+        // transient AX error is unknown, and the app-level tile is the safe
+        // reading of unknown -- a reopen badge on a windowed application sends
+        // the user somewhere they did not ask to go. Neither Accessibility nor
+        // the on-screen window list can see another Space at all, so windows
+        // found there are the remaining reason an empty reading is not an
+        // empty application.
         return hasSwitchableAXWindows
             || hasVisibleWindows
             || isApplicationHidden
+            || hasIncompleteWindowReads
+            || hasWindowsOnAnotherSpace
             ? .application
             : .windowless
     }

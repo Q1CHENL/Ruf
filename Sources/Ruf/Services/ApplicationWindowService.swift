@@ -31,6 +31,7 @@ enum ApplicationWindowService {
 
     private struct ApplicationWindowsQuery: Sendable {
         let hasSwitchableAXWindows: Bool
+        let hasIncompleteWindowReads: Bool
         let windows: [ApplicationWindow]
     }
 
@@ -481,6 +482,14 @@ enum ApplicationWindowService {
             return [:]
         }
 
+        let spaceSpan = PerformanceLog.begin("ax.otherSpaceWindows")
+        let otherSpaceWindowOwners = OtherSpaceWindowResolver
+            .processIdentifiersWithWindows()
+        PerformanceLog.end(
+            spaceSpan,
+            otherSpaceWindowOwners.map { "owners=\($0.count)" } ?? "unavailable"
+        )
+
         let querySpan = PerformanceLog.begin("ax.queryStates")
         let deadline = DispatchTime.now() + totalQueryBudget
         let plan = WindowQueryPlan(
@@ -510,6 +519,8 @@ enum ApplicationWindowService {
                         isApplicationHidden: hiddenProcessIdentifiers.contains(
                             processIdentifier
                         ),
+                        hasWindowsOnAnotherSpace: otherSpaceWindowOwners?
+                            .contains(processIdentifier) ?? false,
                         plan: plan,
                         deadline: deadline
                     )
@@ -540,6 +551,8 @@ enum ApplicationWindowService {
                         isApplicationHidden: hiddenProcessIdentifiers.contains(
                             processIdentifier
                         ),
+                        hasWindowsOnAnotherSpace: otherSpaceWindowOwners?
+                            .contains(processIdentifier) ?? false,
                         plan: plan,
                         deadline: deadline
                     )
@@ -564,6 +577,7 @@ enum ApplicationWindowService {
     private static func queryState(
         for processIdentifier: pid_t,
         isApplicationHidden: Bool,
+        hasWindowsOnAnotherSpace: Bool,
         plan: WindowQueryPlan,
         deadline: DispatchTime
     ) -> WindowStateQueryResult {
@@ -586,6 +600,8 @@ enum ApplicationWindowService {
                 for: processIdentifier
             ),
             isApplicationHidden: isApplicationHidden,
+            hasIncompleteWindowReads: query.hasIncompleteWindowReads,
+            hasWindowsOnAnotherSpace: hasWindowsOnAnotherSpace,
             switchableWindowMinimizedStates: query.windows.map(\.isMinimized)
         )
         let state: ApplicationWindowState?
@@ -671,9 +687,13 @@ enum ApplicationWindowService {
         )
         var windows: [ApplicationWindow] = []
         var hasSwitchableAXWindows = false
+        var hasIncompleteWindowReads = false
         for element in elements {
             guard !Task.isCancelled,
                   DispatchTime.now() < deadline else {
+                // The budget expired mid-scan, so the windows left unread stay
+                // unaccounted for rather than counting as absent.
+                hasIncompleteWindowReads = true
                 break
             }
 
@@ -686,7 +706,12 @@ enum ApplicationWindowService {
                 ],
                 from: element
             ) else {
+                hasIncompleteWindowReads = true
                 continue
+            }
+
+            if containsTransientAXError(windowValues) {
+                hasIncompleteWindowReads = true
             }
 
             let subrole: String? = AXElementReader.decoded(windowValues[0])
@@ -739,6 +764,7 @@ enum ApplicationWindowService {
 
         return ApplicationWindowsQuery(
             hasSwitchableAXWindows: hasSwitchableAXWindows,
+            hasIncompleteWindowReads: hasIncompleteWindowReads,
             windows: windows
         )
     }
