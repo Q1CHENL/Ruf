@@ -30,7 +30,8 @@ final class ApplicationCatalog: NSObject {
     }
 
     func snapshot(
-        includesRufSettingsTarget: Bool = false
+        includesRufSettingsTarget: Bool = false,
+        rufSoftwareUpdateVersion: String? = nil
     ) async -> [SwitchTarget] {
         let snapshotSpan = PerformanceLog.begin("catalog.snapshot")
         let applicationSpan = PerformanceLog.begin("catalog.applications")
@@ -94,7 +95,9 @@ final class ApplicationCatalog: NSObject {
         }
 
         if includesRufSettingsTarget,
-           let settingsTarget = rufSettingsTarget() {
+           let settingsTarget = rufSettingsTarget(
+               softwareUpdateVersion: rufSoftwareUpdateVersion
+           ) {
             targets.append(settingsTarget)
         }
 
@@ -106,7 +109,9 @@ final class ApplicationCatalog: NSObject {
         return targets
     }
 
-    private func rufSettingsTarget() -> SwitchTarget? {
+    private func rufSettingsTarget(
+        softwareUpdateVersion: String?
+    ) -> SwitchTarget? {
         let application = NSRunningApplication.current
         guard
             !application.isTerminated,
@@ -124,7 +129,9 @@ final class ApplicationCatalog: NSObject {
                 name: name,
                 icon: icon
             ),
-            kind: .openRufSettings,
+            kind: .openRufSettings(
+                softwareUpdateVersion: softwareUpdateVersion
+            ),
             dockBadge: nil
         )
     }

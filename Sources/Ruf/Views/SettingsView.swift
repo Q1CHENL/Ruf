@@ -5,6 +5,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @Bindable var preferences: AppPreferences
+    let softwareUpdateAvailability: SoftwareUpdateAvailability
     let onPreferencesChanged: () -> Void
     let onShowAbout: () -> Void
     let onCheckForUpdates: () -> Void
@@ -105,7 +106,7 @@ struct SettingsView: View {
                         action: onShowAbout
                     )
                     SettingsActionButton(
-                        "Check for Updates…",
+                        softwareUpdateActionTitle,
                         action: onCheckForUpdates
                     )
                     SettingsActionButton("Quit Ruf", action: onQuit)
@@ -123,6 +124,12 @@ struct SettingsView: View {
         .onChange(of: preferences.isWindowMovementEnabled) {
             onPreferencesChanged()
         }
+    }
+
+    private var softwareUpdateActionTitle: String {
+        softwareUpdateAvailability.availableVersion.map {
+            "Update Ruf to \($0)…"
+        } ?? "Check for Updates…"
     }
 }
 

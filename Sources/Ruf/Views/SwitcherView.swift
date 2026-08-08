@@ -9,7 +9,7 @@ enum SwitcherMetrics {
     static let selectionRingWidth: CGFloat = 3
     static let selectionRingSize = iconPlateSize + 2 * selectionRingWidth
     static let selectionRingCornerRadius = iconCornerRadius + selectionRingWidth
-    static let reopenBadgeSize: CGFloat = 15
+    static let indicatorBadgeSize: CGFloat = 15
     static let dockBadgeHeight: CGFloat = 15
     static let dockBadgeDotSize: CGFloat = 9
     static let horizontalSpacing: CGFloat = 4
@@ -106,14 +106,28 @@ private struct SwitchTargetCell: View {
                                     .foregroundStyle(.white)
                             }
                             .frame(
-                                width: SwitcherMetrics.reopenBadgeSize,
-                                height: SwitcherMetrics.reopenBadgeSize
+                                width: SwitcherMetrics.indicatorBadgeSize,
+                                height: SwitcherMetrics.indicatorBadgeSize
                             )
                             .accessibilityHidden(true)
                         }
                     }
                     .overlay(alignment: .topTrailing) {
-                        if let dockBadge = target.dockBadge {
+                        if target.showsSoftwareUpdateIndicator {
+                            ZStack {
+                                Circle()
+                                    .fill(Color(nsColor: .systemGreen))
+
+                                Image(systemName: "arrow.up")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundStyle(.white)
+                            }
+                            .frame(
+                                width: SwitcherMetrics.indicatorBadgeSize,
+                                height: SwitcherMetrics.indicatorBadgeSize
+                            )
+                            .accessibilityHidden(true)
+                        } else if let dockBadge = target.dockBadge {
                             DockBadgeView(badge: dockBadge)
                         }
                     }

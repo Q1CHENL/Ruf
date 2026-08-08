@@ -3,7 +3,7 @@ import RufCore
 enum SwitchTargetKind {
     case application
     case applicationWindow(ApplicationWindow)
-    case openRufSettings
+    case openRufSettings(softwareUpdateVersion: String?)
     case window(ApplicationWindow)
     case reopenApplication
 }
@@ -41,6 +41,22 @@ struct SwitchTarget {
         return false
     }
 
+    var showsSoftwareUpdateIndicator: Bool {
+        if case let .openRufSettings(softwareUpdateVersion) = kind {
+            return softwareUpdateVersion != nil
+        }
+
+        return false
+    }
+
+    private var softwareUpdateVersion: String? {
+        if case let .openRufSettings(softwareUpdateVersion) = kind {
+            return softwareUpdateVersion
+        }
+
+        return nil
+    }
+
     var participatesInInitialSelection: Bool {
         if case .openRufSettings = kind {
             return false
@@ -63,10 +79,15 @@ struct SwitchTarget {
             targetLabel = "Reopen \(item.name)"
         }
 
-        guard let dockBadge else {
-            return targetLabel
+        var details = [targetLabel]
+        if showsSoftwareUpdateIndicator,
+           let softwareUpdateVersion {
+            details.append("Ruf update \(softwareUpdateVersion) available")
+        }
+        if let dockBadge {
+            details.append("Dock badge \(dockBadge.accessibilityLabel)")
         }
 
-        return "\(targetLabel), Dock badge \(dockBadge.accessibilityLabel)"
+        return details.joined(separator: ", ")
     }
 }

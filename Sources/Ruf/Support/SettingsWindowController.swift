@@ -42,6 +42,7 @@ final class SettingsWindowController {
 
     init(
         preferences: AppPreferences,
+        softwareUpdateAvailability: SoftwareUpdateAvailability,
         onPreferencesChanged: @escaping () -> Void,
         onShowAbout: @escaping () -> Void,
         onCheckForUpdates: @escaping () -> Void,
@@ -51,6 +52,7 @@ final class SettingsWindowController {
         let hostingController = NSHostingController(
             rootView: SettingsView(
                 preferences: preferences,
+                softwareUpdateAvailability: softwareUpdateAvailability,
                 onPreferencesChanged: onPreferencesChanged,
                 onShowAbout: onShowAbout,
                 onCheckForUpdates: onCheckForUpdates,

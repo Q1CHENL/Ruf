@@ -9,6 +9,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let focusedWindowMover = FocusedWindowMover()
     private let model = SwitcherModel()
     private let preferences = AppPreferences()
+    private let softwareUpdateAvailability = SoftwareUpdateAvailability(
+        currentVersion: Bundle.main.object(
+            forInfoDictionaryKey: "CFBundleShortVersionString"
+        ) as? String ?? ""
+    )
 
     private lazy var panelController = SwitcherPanelController(
         model: model,
@@ -27,6 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private lazy var settingsWindowController = SettingsWindowController(
         preferences: preferences,
+        softwareUpdateAvailability: softwareUpdateAvailability,
         onPreferencesChanged: { [weak self] in
             self?.preferencesDidChange()
         },
@@ -46,7 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private lazy var softwareUpdateController = SPUStandardUpdaterController(
         startingUpdater: false,
-        updaterDelegate: nil,
+        updaterDelegate: self,
         userDriverDelegate: nil
     )
 
@@ -144,7 +150,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
 
             let targets = await catalog.snapshot(
-                includesRufSettingsTarget: !preferences.showsMenuBarItem
+                includesRufSettingsTarget: !preferences.showsMenuBarItem,
+                rufSoftwareUpdateVersion:
+                    softwareUpdateAvailability.availableVersion
             )
             guard !Task.isCancelled else {
                 return
@@ -376,8 +384,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func updateSoftwareUpdateMenuItem() {
+        softwareUpdateMenuItem?.title = softwareUpdateActionTitle
         softwareUpdateMenuItem?.isEnabled =
             softwareUpdateController.updater.canCheckForUpdates
+    }
+
+    private var softwareUpdateActionTitle: String {
+        softwareUpdateAvailability.availableVersion.map {
+            "Update Ruf to \($0)…"
+        } ?? "Check for Updates…"
     }
 
     private func updateAccessibilityMenuItem(accessibilityGranted: Bool) {
@@ -588,5 +603,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc
     private func quit() {
         NSApp.terminate(nil)
+    }
+}
+
+extension AppDelegate: SPUUpdaterDelegate {
+    func updater(
+        _ updater: SPUUpdater,
+        didFindValidUpdate item: SUAppcastItem
+    ) {
+        softwareUpdateAvailability.recordAvailable(
+            version: item.displayVersionString
+        )
+        updateSoftwareUpdateMenuItem()
+    }
+
+    func updaterDidNotFindUpdate(
+        _ updater: SPUUpdater,
+        error: any Error
+    ) {
+        softwareUpdateAvailability.clear()
+        updateSoftwareUpdateMenuItem()
+    }
+
+    func updater(
+        _ updater: SPUUpdater,
+        userDidMake choice: SPUUserUpdateChoice,
+        forUpdate updateItem: SUAppcastItem,
+        state: SPUUserUpdateState
+    ) {
+        guard choice == .skip else {
+            return
+        }
+
+        softwareUpdateAvailability.clear(
+            version: updateItem.displayVersionString
+        )
+        updateSoftwareUpdateMenuItem()
     }
 }
