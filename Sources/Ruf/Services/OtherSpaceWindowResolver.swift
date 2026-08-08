@@ -97,8 +97,7 @@ enum OtherSpaceWindowResolver {
         // silently restore the bug this exists to fix, so it degrades to the
         // unavailable answer instead. Having Spaces but none of them other
         // than the current one is the ordinary single-Space Mac.
-        let (spaceIdentifiers, hasAnySpace) = otherSpaceIdentifiers(in: displays)
-        guard hasAnySpace else {
+        guard let spaceIdentifiers = otherSpaceIdentifiers(in: displays) else {
             return nil
         }
         guard !spaceIdentifiers.isEmpty else {
@@ -123,7 +122,7 @@ enum OtherSpaceWindowResolver {
 
     private static func otherSpaceIdentifiers(
         in displays: [NSDictionary]
-    ) -> (identifiers: [UInt64], hasAnySpace: Bool) {
+    ) -> [UInt64]? {
         var currentIdentifiers: Set<UInt64> = []
         var allIdentifiers: [UInt64] = []
 
@@ -140,28 +139,19 @@ enum OtherSpaceWindowResolver {
             }
         }
 
-        return (
-            allIdentifiers.filter { !currentIdentifiers.contains($0) },
-            !allIdentifiers.isEmpty
-        )
+        guard !allIdentifiers.isEmpty else {
+            return nil
+        }
+
+        return allIdentifiers.filter { !currentIdentifiers.contains($0) }
     }
 
     private static func owners(
         of windowIdentifiers: [CGWindowID]
     ) -> Set<pid_t> {
-        let identifierArray = windowIdentifiers
-            .map { UnsafeRawPointer(bitPattern: UInt($0)) }
-            .withUnsafeBufferPointer {
-                CFArrayCreate(
-                    nil,
-                    UnsafeMutablePointer(mutating: $0.baseAddress),
-                    $0.count,
-                    nil
-                )
-            }
-        guard let descriptions = CGWindowListCreateDescriptionFromArray(
-            identifierArray
-        ) as? [[String: Any]] else {
+        guard let descriptions = WindowServerDescriptionReader.descriptions(
+            for: windowIdentifiers
+        ) else {
             return []
         }
 

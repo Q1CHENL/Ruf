@@ -251,7 +251,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 break
             }
 
-            let result = await ApplicationWindowService.openNewWindow(
+            let result = await NewWindowMenuService.open(
                 in: application
             )
             guard !Task.isCancelled,

@@ -81,48 +81,41 @@ final class FocusedWindowMover: NSObject {
             return
         }
 
-        if let activeAnimation {
-            let destinationExists = screens.contains {
-                $0.geometry.frame == activeAnimation.destinationDisplayFrame
+        let retargeting: (
+            animation: ActiveAnimation,
+            source: DisplayGeometry
+        )?
+        if let animation = activeAnimation {
+            let destinationScreen = screens.first {
+                $0.geometry.frame == animation.destinationDisplayFrame
             }
-            let focusedWindowMatches = CFEqual(
-                activeAnimation.window,
-                window.element
-            )
             if let reason = WindowMovementAnimationStopReason.beforeMove(
-                destinationExists: destinationExists,
-                focusedWindowMatches: focusedWindowMatches
+                destinationExists: destinationScreen != nil,
+                focusedWindowMatches: CFEqual(animation.window, window.element)
             ) {
                 stopAnimation(reason)
+                retargeting = nil
+            } else {
+                retargeting = destinationScreen.map {
+                    (animation: animation, source: $0.geometry)
+                }
             }
+        } else {
+            retargeting = nil
         }
 
-        let currentAnimation = activeAnimation.flatMap { animation in
-            CFEqual(animation.window, window.element) ? animation : nil
-        }
-        let preferredSource = currentAnimation.flatMap { animation in
-            screens.first {
-                $0.geometry.frame == animation.destinationDisplayFrame
-            }?.geometry
-        }
-        let planningFrame: CGRect
-        if let currentAnimation, preferredSource != nil {
-            planningFrame = CGRect(
-                origin: currentAnimation.destinationFrame.origin,
+        let planningFrame = retargeting.map {
+            CGRect(
+                origin: $0.animation.destinationFrame.origin,
                 size: window.frame.size
             )
-        } else {
-            if currentAnimation != nil {
-                stopAnimation(.displayConfigurationChanged)
-            }
-            planningFrame = window.frame
-        }
+        } ?? window.frame
 
         guard let plan = planner.plan(
             windowFrame: planningFrame,
             displays: screens.map(\.geometry),
             direction: direction,
-            preferredSourceDisplay: preferredSource
+            preferredSourceDisplay: retargeting?.source
         ), let destinationScreen = screens.first(where: {
             $0.geometry == plan.destinationDisplay
         }) else {
@@ -378,8 +371,16 @@ final class FocusedWindowMover: NSObject {
               subrole == kAXStandardWindowSubrole,
               values[4] as? Bool != true,
               isPositionSettable(of: window),
-              let position = point(from: values[2]),
-              let size = size(from: values[3]),
+              let position: CGPoint = AXElementReader.decodedAXValue(
+                  values[2],
+                  type: .cgPoint,
+                  initialValue: .zero
+              ),
+              let size: CGSize = AXElementReader.decodedAXValue(
+                  values[3],
+                  type: .cgSize,
+                  initialValue: .zero
+              ),
               size.width > 0,
               size.height > 0 else {
             return nil
@@ -461,36 +462,6 @@ final class FocusedWindowMover: NSObject {
             width: appKitRect.width,
             height: appKitRect.height
         )
-    }
-
-    private func point(from rawValue: Any) -> CGPoint? {
-        let rawValue = rawValue as CFTypeRef
-        guard CFGetTypeID(rawValue) == AXValueGetTypeID() else {
-            return nil
-        }
-
-        let value = rawValue as! AXValue
-        guard AXValueGetType(value) == .cgPoint else {
-            return nil
-        }
-
-        var point = CGPoint.zero
-        return AXValueGetValue(value, .cgPoint, &point) ? point : nil
-    }
-
-    private func size(from rawValue: Any) -> CGSize? {
-        let rawValue = rawValue as CFTypeRef
-        guard CFGetTypeID(rawValue) == AXValueGetTypeID() else {
-            return nil
-        }
-
-        let value = rawValue as! AXValue
-        guard AXValueGetType(value) == .cgSize else {
-            return nil
-        }
-
-        var size = CGSize.zero
-        return AXValueGetValue(value, .cgSize, &size) ? size : nil
     }
 
     private func isPositionSettable(of window: AXUIElement) -> Bool {

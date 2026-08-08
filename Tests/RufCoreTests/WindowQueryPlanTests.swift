@@ -37,84 +37,33 @@ final class WindowQueryPlanTests: XCTestCase {
     }
 
     func testChoosesTargetShapeFromSwitchableWindows() {
+        XCTAssertEqual(resolve(), .windowless)
+        XCTAssertEqual(resolve(hasVisibleWindows: true), .application)
+        XCTAssertEqual(resolve(hasSwitchableAXWindows: true), .application)
         XCTAssertEqual(
-            WindowQueryDisposition.resolve(
-                hasSwitchableAXWindows: false,
-                hasVisibleWindows: false,
-                isApplicationHidden: false,
-                hasIncompleteWindowReads: false,
-                hasWindowsOnAnotherSpace: false,
-                switchableWindowMinimizedStates: []
-            ),
-            .windowless
-        )
-        XCTAssertEqual(
-            WindowQueryDisposition.resolve(
-                hasSwitchableAXWindows: false,
-                hasVisibleWindows: true,
-                isApplicationHidden: false,
-                hasIncompleteWindowReads: false,
-                hasWindowsOnAnotherSpace: false,
-                switchableWindowMinimizedStates: []
-            ),
-            .application
-        )
-        XCTAssertEqual(
-            WindowQueryDisposition.resolve(
-                hasSwitchableAXWindows: true,
-                hasVisibleWindows: false,
-                isApplicationHidden: false,
-                hasIncompleteWindowReads: false,
-                hasWindowsOnAnotherSpace: false,
-                switchableWindowMinimizedStates: []
-            ),
-            .application
-        )
-        XCTAssertEqual(
-            WindowQueryDisposition.resolve(
+            resolve(
                 hasSwitchableAXWindows: true,
                 hasVisibleWindows: true,
-                isApplicationHidden: false,
-                hasIncompleteWindowReads: false,
-                hasWindowsOnAnotherSpace: false,
                 switchableWindowMinimizedStates: [false]
             ),
             .singleWindow
         )
         XCTAssertEqual(
-            WindowQueryDisposition.resolve(
+            resolve(
                 hasSwitchableAXWindows: true,
-                hasVisibleWindows: false,
-                isApplicationHidden: false,
-                hasIncompleteWindowReads: false,
-                hasWindowsOnAnotherSpace: false,
                 switchableWindowMinimizedStates: [true]
             ),
             .windows
         )
         XCTAssertEqual(
-            WindowQueryDisposition.resolve(
+            resolve(
                 hasSwitchableAXWindows: true,
                 hasVisibleWindows: true,
-                isApplicationHidden: false,
-                hasIncompleteWindowReads: false,
-                hasWindowsOnAnotherSpace: false,
                 switchableWindowMinimizedStates: [false, true]
             ),
             .windows
         )
-
-        XCTAssertEqual(
-            WindowQueryDisposition.resolve(
-                hasSwitchableAXWindows: false,
-                hasVisibleWindows: false,
-                isApplicationHidden: true,
-                hasIncompleteWindowReads: false,
-                hasWindowsOnAnotherSpace: false,
-                switchableWindowMinimizedStates: []
-            ),
-            .application
-        )
+        XCTAssertEqual(resolve(isApplicationHidden: true), .application)
     }
 
     // hasVisibleWindows stops covering for AX reads that time out as soon as
@@ -122,36 +71,17 @@ final class WindowQueryPlanTests: XCTestCase {
     // scan has to fall back to the app tile on its own.
     func testIncompleteWindowReadsNeverReportWindowless() {
         XCTAssertEqual(
-            WindowQueryDisposition.resolve(
-                hasSwitchableAXWindows: false,
-                hasVisibleWindows: false,
-                isApplicationHidden: false,
-                hasIncompleteWindowReads: true,
-                hasWindowsOnAnotherSpace: false,
-                switchableWindowMinimizedStates: []
-            ),
+            resolve(hasIncompleteWindowReads: true),
             .application
         )
-        XCTAssertEqual(
-            WindowQueryDisposition.resolve(
-                hasSwitchableAXWindows: false,
-                hasVisibleWindows: false,
-                isApplicationHidden: false,
-                hasIncompleteWindowReads: false,
-                hasWindowsOnAnotherSpace: false,
-                switchableWindowMinimizedStates: []
-            ),
-            .windowless
-        )
+        XCTAssertEqual(resolve(), .windowless)
+
         // Windows that were read stay authoritative even when the rest of the
         // scan did not finish.
         XCTAssertEqual(
-            WindowQueryDisposition.resolve(
+            resolve(
                 hasSwitchableAXWindows: true,
-                hasVisibleWindows: false,
-                isApplicationHidden: false,
                 hasIncompleteWindowReads: true,
-                hasWindowsOnAnotherSpace: false,
                 switchableWindowMinimizedStates: [false]
             ),
             .singleWindow
@@ -164,40 +94,41 @@ final class WindowQueryPlanTests: XCTestCase {
     // WindowServer's Space bookkeeping is the only thing that contradicts them.
     func testWindowsOnAnotherSpaceOutweighTwoEmptyReadings() {
         XCTAssertEqual(
-            WindowQueryDisposition.resolve(
-                hasSwitchableAXWindows: false,
-                hasVisibleWindows: false,
-                isApplicationHidden: false,
-                hasIncompleteWindowReads: false,
-                hasWindowsOnAnotherSpace: true,
-                switchableWindowMinimizedStates: []
-            ),
+            resolve(hasWindowsOnAnotherSpace: true),
             .application
         )
+
         // An application with nothing anywhere still earns its reopen badge.
-        XCTAssertEqual(
-            WindowQueryDisposition.resolve(
-                hasSwitchableAXWindows: false,
-                hasVisibleWindows: false,
-                isApplicationHidden: false,
-                hasIncompleteWindowReads: false,
-                hasWindowsOnAnotherSpace: false,
-                switchableWindowMinimizedStates: []
-            ),
-            .windowless
-        )
+        XCTAssertEqual(resolve(), .windowless)
+
         // Windows on the current Space stay the ones the switcher offers; a
         // Space the user is not on does not add targets to the grid.
         XCTAssertEqual(
-            WindowQueryDisposition.resolve(
+            resolve(
                 hasSwitchableAXWindows: true,
                 hasVisibleWindows: true,
-                isApplicationHidden: false,
-                hasIncompleteWindowReads: false,
                 hasWindowsOnAnotherSpace: true,
                 switchableWindowMinimizedStates: [false]
             ),
             .singleWindow
+        )
+    }
+
+    private func resolve(
+        hasSwitchableAXWindows: Bool = false,
+        hasVisibleWindows: Bool = false,
+        isApplicationHidden: Bool = false,
+        hasIncompleteWindowReads: Bool = false,
+        hasWindowsOnAnotherSpace: Bool = false,
+        switchableWindowMinimizedStates: [Bool] = []
+    ) -> WindowQueryDisposition {
+        WindowQueryDisposition.resolve(
+            hasSwitchableAXWindows: hasSwitchableAXWindows,
+            hasVisibleWindows: hasVisibleWindows,
+            isApplicationHidden: isApplicationHidden,
+            hasIncompleteWindowReads: hasIncompleteWindowReads,
+            hasWindowsOnAnotherSpace: hasWindowsOnAnotherSpace,
+            switchableWindowMinimizedStates: switchableWindowMinimizedStates
         )
     }
 }

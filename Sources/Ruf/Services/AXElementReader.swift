@@ -34,4 +34,48 @@ enum AXElementReader {
 
         return rawValue as? Value
     }
+
+    static func decodedAXValue<Value: BitwiseCopyable>(
+        _ value: Any,
+        type: AXValueType,
+        initialValue: Value
+    ) -> Value? {
+        let rawValue = value as CFTypeRef
+        guard CFGetTypeID(rawValue) == AXValueGetTypeID() else {
+            return nil
+        }
+
+        let axValue = rawValue as! AXValue
+        guard AXValueGetType(axValue) == type else {
+            return nil
+        }
+
+        var decodedValue = initialValue
+        return AXValueGetValue(axValue, type, &decodedValue)
+            ? decodedValue
+            : nil
+    }
+
+    static func error(from value: Any) -> AXError? {
+        decodedAXValue(
+            value,
+            type: .axError,
+            initialValue: AXError.success
+        )
+    }
+
+    static func containsTransientError(in values: [Any]) -> Bool {
+        values.contains { value in
+            guard let error = error(from: value) else {
+                return false
+            }
+
+            switch error {
+            case .attributeUnsupported, .noValue:
+                return false
+            default:
+                return true
+            }
+        }
+    }
 }
