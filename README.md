@@ -80,8 +80,9 @@ The workflow reads these secrets from the `release` GitHub environment:
 
 - `RUF_CODESIGN_CERTIFICATE_P12`: the base64-encoded pinned self-signed `.p12`
 - `RUF_CODESIGN_CERTIFICATE_PASSWORD`: the `.p12` export password
-- `RUF_SPARKLE_PRIVATE_KEY`: the private key exported by Sparkle's
-  `generate_keys --account com.qichen.ruf -x` command
+- `RUF_SPARKLE_PRIVATE_KEY`: the contents of the file written by Sparkle's
+  `generate_keys --account com.qichen.ruf -x /secure/path/Ruf-Sparkle.private-key`
+  command
 
 Create that environment before pushing the first automated release tag. Keep
 it approval-free for automatic publication, restrict deployments to release
