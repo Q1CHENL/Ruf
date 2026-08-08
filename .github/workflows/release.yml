@@ -225,7 +225,6 @@ jobs:
           fi
 
           certificate_path="$RUNNER_TEMP/ruf-release.p12"
-          certificate_pem="$RUNNER_TEMP/ruf-release.pem"
           keychain_path="$RUNNER_TEMP/ruf-release.keychain-db"
           keychain_password="$(/usr/bin/uuidgen)-$(/usr/bin/uuidgen)"
           echo "RUF_RELEASE_KEYCHAIN=$keychain_path" >> "$GITHUB_ENV"
@@ -242,14 +241,6 @@ jobs:
             -k "$keychain_path" \
             -P "$CERTIFICATE_PASSWORD" \
             -T /usr/bin/codesign
-          /usr/bin/security find-certificate \
-            -c 'Ruf Release Code Signing' \
-            -p "$keychain_path" > "$certificate_pem"
-          /usr/bin/security add-trusted-cert \
-            -r trustRoot \
-            -p codeSign \
-            -k "$keychain_path" \
-            "$certificate_pem"
           /usr/bin/security set-key-partition-list \
             -S apple-tool:,apple:,codesign: \
             -s \
@@ -261,7 +252,13 @@ jobs:
           /usr/bin/security default-keychain \
             -d user \
             -s "$keychain_path"
-          /bin/rm -f "$certificate_path" "$certificate_pem"
+          /usr/bin/security find-identity \
+            -v \
+            -p codesigning \
+            "$keychain_path" \
+            | /usr/bin/grep -F \
+              '979E44A42CA7D82F7C73198B826E5D469C4021A9 "Ruf Release Code Signing"'
+          /bin/rm -f "$certificate_path"
 
       - name: Build the self-signed release
         env:
@@ -442,5 +439,4 @@ jobs:
             /usr/bin/security delete-keychain "$RUF_RELEASE_KEYCHAIN" || true
           fi
           /bin/rm -f \
-            "$RUNNER_TEMP/ruf-release.p12" \
-            "$RUNNER_TEMP/ruf-release.pem"
+            "$RUNNER_TEMP/ruf-release.p12"
