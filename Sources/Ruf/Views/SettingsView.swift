@@ -5,11 +5,15 @@ import SwiftUI
 
 struct SettingsView: View {
     @Bindable var preferences: AppPreferences
-    let onKeyboardCaptureChanged: () -> Void
+    let onPreferencesChanged: () -> Void
+    let onShowAbout: () -> Void
+    let onCheckForUpdates: () -> Void
+    let onOpenAccessibilitySettings: () -> Void
+    let onQuit: () -> Void
 
     var body: some View {
         Form {
-            Section("General") {
+            Section {
                 Picker("Command-Tab", selection: $preferences.switcherMode) {
                     Text("Ruf")
                         .tag(AppSwitcherMode.ruf)
@@ -18,8 +22,21 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.radioGroup)
 
+                Toggle(
+                    "Show Ruf in Menu Bar",
+                    isOn: $preferences.showsMenuBarItem
+                )
+                .disabled(preferences.switcherMode != .ruf)
+
                 LaunchAtLoginSetting(
                     onUserChange: preferences.markLaunchAtLoginConfigured
+                )
+            } header: {
+                Text("General")
+            } footer: {
+                Text(
+                    "When hidden, select Ruf in the switcher to reopen "
+                        + "Settings. macOS mode keeps the menu bar item visible."
                 )
             }
 
@@ -74,15 +91,56 @@ struct SettingsView: View {
                     )
                 }
             }
+
+            Section("Ruf") {
+                AccessibilitySetting(
+                    isRequired: preferences.switcherMode == .ruf
+                        || preferences.isWindowMovementEnabled,
+                    onOpenSystemSettings: onOpenAccessibilitySettings
+                )
+
+                HStack(spacing: 12) {
+                    SettingsActionButton(
+                        "About Ruf…",
+                        action: onShowAbout
+                    )
+                    SettingsActionButton(
+                        "Check for Updates…",
+                        action: onCheckForUpdates
+                    )
+                    SettingsActionButton("Quit Ruf", action: onQuit)
+                }
+            }
         }
         .formStyle(.grouped)
-        .frame(width: 480, height: 440)
+        .frame(width: 520, height: 620)
         .onChange(of: preferences.switcherMode) {
-            onKeyboardCaptureChanged()
+            onPreferencesChanged()
+        }
+        .onChange(of: preferences.showsMenuBarItem) {
+            onPreferencesChanged()
         }
         .onChange(of: preferences.isWindowMovementEnabled) {
-            onKeyboardCaptureChanged()
+            onPreferencesChanged()
         }
+    }
+}
+
+private struct SettingsActionButton: View {
+    let title: String
+    let action: () -> Void
+
+    init(_ title: String, action: @escaping () -> Void) {
+        self.title = title
+        self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.bordered)
     }
 }
 
@@ -193,5 +251,46 @@ private struct LaunchAtLoginSetting: View {
 
     private func refreshStatus() {
         status = SMAppService.mainApp.status
+    }
+}
+
+private struct AccessibilitySetting: View {
+    let isRequired: Bool
+    let onOpenSystemSettings: () -> Void
+
+    @State private var isGranted = AccessibilityPermission.isGranted
+
+    var body: some View {
+        LabeledContent("Accessibility") {
+            HStack(spacing: 12) {
+                Text(statusLabel)
+                    .foregroundStyle(.secondary)
+
+                Button("Open System Settings…") {
+                    onOpenSystemSettings()
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+        .onAppear(perform: refreshStatus)
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: NSApplication.didBecomeActiveNotification
+            )
+        ) { _ in
+            refreshStatus()
+        }
+    }
+
+    private var statusLabel: String {
+        if isGranted {
+            return "Enabled"
+        }
+
+        return isRequired ? "Required" : "Not Enabled"
+    }
+
+    private func refreshStatus() {
+        isGranted = AccessibilityPermission.isGranted
     }
 }

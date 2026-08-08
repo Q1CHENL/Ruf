@@ -3,6 +3,7 @@ import RufCore
 enum SwitchTargetKind {
     case application
     case applicationWindow(ApplicationWindow)
+    case openRufSettings
     case window(ApplicationWindow)
     case reopenApplication
 }
@@ -40,12 +41,22 @@ struct SwitchTarget {
         return false
     }
 
+    var participatesInInitialSelection: Bool {
+        if case .openRufSettings = kind {
+            return false
+        }
+
+        return true
+    }
+
     var accessibilityLabel: String {
         let targetLabel: String
 
         switch kind {
         case .application, .applicationWindow:
             targetLabel = item.name
+        case .openRufSettings:
+            targetLabel = "Open Ruf Settings"
         case let .window(window):
             targetLabel = window.title.map { "\(item.name), \($0)" } ?? item.name
         case .reopenApplication:

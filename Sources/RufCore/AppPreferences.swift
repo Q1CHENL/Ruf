@@ -11,6 +11,7 @@ public enum AppSwitcherMode: String, Sendable {
 public final class AppPreferences {
     private enum Key {
         static let launchAtLoginConfigured = "launchAtLoginConfigured"
+        static let showsMenuBarItem = "showsMenuBarItem"
         static let switcherMode = "switcherMode"
         static let windowMovementEnabled = "windowMovementEnabled"
     }
@@ -19,11 +20,32 @@ public final class AppPreferences {
 
     public var switcherMode: AppSwitcherMode {
         didSet {
+            if switcherMode == .system {
+                showsMenuBarItem = true
+            }
+
             guard switcherMode != oldValue else {
                 return
             }
 
             defaults.set(switcherMode.rawValue, forKey: Key.switcherMode)
+        }
+    }
+
+    public var showsMenuBarItem: Bool {
+        didSet {
+            if switcherMode == .system, !showsMenuBarItem {
+                showsMenuBarItem = true
+            }
+
+            guard showsMenuBarItem != oldValue else {
+                return
+            }
+
+            defaults.set(
+                showsMenuBarItem,
+                forKey: Key.showsMenuBarItem
+            )
         }
     }
 
@@ -49,12 +71,27 @@ public final class AppPreferences {
     }
 
     public init(defaults: UserDefaults) {
-        self.defaults = defaults
-        switcherMode = defaults.string(forKey: Key.switcherMode)
+        let switcherMode = defaults.string(forKey: Key.switcherMode)
             .flatMap(AppSwitcherMode.init(rawValue:)) ?? .ruf
+        let storedMenuBarVisibility = defaults.object(
+            forKey: Key.showsMenuBarItem
+        ) as? Bool ?? true
+
+        self.defaults = defaults
+        self.switcherMode = switcherMode
+        showsMenuBarItem = switcherMode == .system
+            ? true
+            : storedMenuBarVisibility
         isWindowMovementEnabled = defaults.object(
             forKey: Key.windowMovementEnabled
         ) as? Bool ?? true
+
+        if showsMenuBarItem != storedMenuBarVisibility {
+            defaults.set(
+                showsMenuBarItem,
+                forKey: Key.showsMenuBarItem
+            )
+        }
     }
 
     public func markLaunchAtLoginConfigured() {

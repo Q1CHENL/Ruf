@@ -14,6 +14,7 @@ public struct SwitcherSession: Equatable, Sendable {
 
     public mutating func begin<Group: Equatable>(
         groupIdentifiers: [Group],
+        initialSelectionTargetCount: Int? = nil,
         backwards: Bool
     ) {
         guard let currentGroup = groupIdentifiers.first else {
@@ -22,13 +23,22 @@ public struct SwitcherSession: Equatable, Sendable {
         }
 
         itemCount = groupIdentifiers.count
+        let resolvedInitialTargetCount = min(
+            max(initialSelectionTargetCount ?? itemCount, 0),
+            itemCount
+        )
+        let initialTargetCount = max(1, resolvedInitialTargetCount)
+        let initialGroupIdentifiers = groupIdentifiers.prefix(
+            initialTargetCount
+        )
         let differentGroupIndex = backwards
-            ? groupIdentifiers.lastIndex { $0 != currentGroup }
-            : groupIdentifiers.firstIndex { $0 != currentGroup }
+            ? initialGroupIdentifiers.lastIndex { $0 != currentGroup }
+            : initialGroupIdentifiers.firstIndex { $0 != currentGroup }
         let fallbackMove: GridMove = backwards ? .backward : .forward
+        let initialNavigation = GridNavigation(itemCount: initialTargetCount)
 
         selectedIndex = differentGroupIndex
-            ?? navigation.moving(from: 0, fallbackMove)
+            ?? initialNavigation.moving(from: 0, fallbackMove)
     }
 
     public mutating func move(_ move: GridMove) {

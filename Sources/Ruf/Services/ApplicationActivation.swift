@@ -4,24 +4,40 @@ import AppKit
 enum ApplicationActivation {
     private static let activationTimeout: Duration = .seconds(1)
 
-    static func activate(_ application: NSRunningApplication) async -> Bool {
+    static func activate(
+        _ application: NSRunningApplication,
+        from sourceApplication: NSRunningApplication? = nil,
+        options: NSApplication.ActivationOptions = []
+    ) async -> Bool {
         if application.isActive {
             return true
         }
 
-        return await Waiter(application: application).wait()
+        return await Waiter(
+            application: application,
+            sourceApplication: sourceApplication,
+            options: options
+        ).wait()
     }
 
     @MainActor
     private final class Waiter {
         private let application: NSRunningApplication
+        private let options: NSApplication.ActivationOptions
+        private let sourceApplication: NSRunningApplication?
         private let notificationCenter = NSWorkspace.shared.notificationCenter
         private var observer: NSObjectProtocol?
         private var timeoutTask: Task<Void, Never>?
         private var continuation: CheckedContinuation<Bool, Never>?
 
-        init(application: NSRunningApplication) {
+        init(
+            application: NSRunningApplication,
+            sourceApplication: NSRunningApplication?,
+            options: NSApplication.ActivationOptions
+        ) {
             self.application = application
+            self.sourceApplication = sourceApplication
+            self.options = options
         }
 
         func wait() async -> Bool {
@@ -46,7 +62,18 @@ enum ApplicationActivation {
                     }
                 }
 
-                if !application.activate(options: []) {
+                let activationWasRequested = if let sourceApplication,
+                    sourceApplication.processIdentifier
+                        != application.processIdentifier {
+                    application.activate(
+                        from: sourceApplication,
+                        options: options
+                    )
+                } else {
+                    application.activate(options: options)
+                }
+
+                if !activationWasRequested {
                     finish(false)
                     return
                 }

@@ -36,6 +36,30 @@ final class SwitcherSessionTests: XCTestCase {
         XCTAssertNil(session.selectedIndex)
     }
 
+    func testBeginSkipsATrailingAuxiliaryTargetForInitialSelection() {
+        var session = SwitcherSession()
+        let groupIdentifiers = [0, 1, 2, 99]
+
+        session.begin(
+            groupIdentifiers: groupIdentifiers,
+            initialSelectionTargetCount: 3,
+            backwards: false
+        )
+        XCTAssertEqual(session.selectedIndex, 1)
+
+        session.begin(
+            groupIdentifiers: groupIdentifiers,
+            initialSelectionTargetCount: 3,
+            backwards: true
+        )
+        XCTAssertEqual(session.selectedIndex, 2)
+        XCTAssertEqual(session.itemCount, 4)
+
+        session.move(.forward)
+
+        XCTAssertEqual(session.selectedIndex, 3)
+    }
+
     func testMoveSelectFinishAndCancelMaintainSessionState() {
         var session = SwitcherSession()
         session.begin(

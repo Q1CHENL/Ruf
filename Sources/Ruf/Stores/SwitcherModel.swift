@@ -17,8 +17,12 @@ final class SwitcherModel {
 
     func begin(with targets: [SwitchTarget], backwards: Bool) {
         self.targets = targets
+        let initialSelectionTargetCount = targets.prefix {
+            $0.participatesInInitialSelection
+        }.count
         session.begin(
             groupIdentifiers: targets.map(\.item.bundleIdentifier),
+            initialSelectionTargetCount: initialSelectionTargetCount,
             backwards: backwards
         )
     }

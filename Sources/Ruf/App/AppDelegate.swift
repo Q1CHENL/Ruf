@@ -27,8 +27,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private lazy var settingsWindowController = SettingsWindowController(
         preferences: preferences,
-        onKeyboardCaptureChanged: { [weak self] in
-            self?.keyboardCapturePreferencesDidChange()
+        onPreferencesChanged: { [weak self] in
+            self?.preferencesDidChange()
+        },
+        onShowAbout: { [weak self] in
+            self?.showAbout()
+        },
+        onCheckForUpdates: { [weak self] in
+            self?.checkForUpdates(nil)
+        },
+        onOpenAccessibilitySettings: { [weak self] in
+            self?.requestAccessibility(openSystemSettings: true)
+        },
+        onQuit: { [weak self] in
+            self?.quit()
         }
     )
 
@@ -53,7 +65,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         enableLaunchAtLoginByDefaultIfNeeded()
         installStatusItem()
         panelController.prepare(itemCount: 0)
-        applyKeyboardCapturePreferences()
+        applyPreferences()
         softwareUpdateController.startUpdater()
     }
 
@@ -131,7 +143,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 return
             }
 
-            let targets = await catalog.snapshot()
+            let targets = await catalog.snapshot(
+                includesRufSettingsTarget: !preferences.showsMenuBarItem
+            )
             guard !Task.isCancelled else {
                 return
             }
@@ -193,6 +207,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 window,
                 in: target.item.application
             )
+        case .openRufSettings:
+            settingsWindowController.show()
         case .reopenApplication:
             ApplicationWindowService.reopen(target.item.application)
         }
@@ -207,6 +223,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func openNewWindow(for target: SwitchTarget) {
+        if case .openRufSettings = target.kind {
+            settingsWindowController.show()
+            return
+        }
+
         if case .reopenApplication = target.kind {
             ApplicationWindowService.reopen(target.item.application)
             return
@@ -226,7 +247,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             switch target.kind {
             case let .applicationWindow(window), let .window(window):
                 ApplicationWindowService.activate(window, in: application)
-            case .application, .reopenApplication:
+            case .application, .openRufSettings, .reopenApplication:
                 break
             }
 
@@ -251,6 +272,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func quitSelectedApplication() {
         guard let target = takeSelection() else {
+            return
+        }
+
+        if case .openRufSettings = target.kind {
+            NSApp.terminate(nil)
             return
         }
 
@@ -308,12 +334,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         ).target = self
         let softwareUpdateMenuItem = menu.addItem(
             withTitle: "Check for Updates…",
-            action: #selector(
-                SPUStandardUpdaterController.checkForUpdates(_:)
-            ),
+            action: #selector(checkForUpdates(_:)),
             keyEquivalent: ""
         )
-        softwareUpdateMenuItem.target = softwareUpdateController
+        softwareUpdateMenuItem.target = self
         menu.addItem(.separator())
         menu.addItem(
             withTitle: "Settings…",
@@ -337,6 +361,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         self.statusItem = statusItem
         self.softwareUpdateMenuItem = softwareUpdateMenuItem
         self.accessibilityMenuItem = accessibilityMenuItem
+    }
+
+    private func applyPreferences() {
+        statusItem?.isVisible = preferences.showsMenuBarItem
+        applyKeyboardCapturePreferences()
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
@@ -462,8 +491,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateAccessibilityMenuItem(accessibilityGranted: accessibilityGranted)
     }
 
-    private func keyboardCapturePreferencesDidChange() {
-        applyKeyboardCapturePreferences()
+    private func preferencesDidChange() {
+        applyPreferences()
     }
 
     private func enableLaunchAtLoginByDefaultIfNeeded() {
@@ -532,6 +561,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc
     private func showSettings() {
         settingsWindowController.show()
+    }
+
+    @objc
+    private func checkForUpdates(_ sender: Any?) {
+        guard softwareUpdateController.updater.canCheckForUpdates else {
+            NSSound.beep()
+            return
+        }
+
+        softwareUpdateController.checkForUpdates(sender)
     }
 
     @objc

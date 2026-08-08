@@ -29,7 +29,9 @@ final class ApplicationCatalog: NSObject {
         )
     }
 
-    func snapshot() async -> [SwitchTarget] {
+    func snapshot(
+        includesRufSettingsTarget: Bool = false
+    ) async -> [SwitchTarget] {
         let snapshotSpan = PerformanceLog.begin("catalog.snapshot")
         let applicationSpan = PerformanceLog.begin("catalog.applications")
         let applications = applicationSnapshot()
@@ -50,7 +52,7 @@ final class ApplicationCatalog: NSObject {
             dockBadgesQuery
         )
 
-        let targets = applications.flatMap { item -> [SwitchTarget] in
+        var targets = applications.flatMap { item -> [SwitchTarget] in
             let dockBadge = item.application.bundleURL.flatMap {
                 dockBadges[$0.standardizedFileURL]
             }
@@ -91,12 +93,40 @@ final class ApplicationCatalog: NSObject {
             }
         }
 
+        if includesRufSettingsTarget,
+           let settingsTarget = rufSettingsTarget() {
+            targets.append(settingsTarget)
+        }
+
         PerformanceLog.end(
             snapshotSpan,
             "apps=\(applications.count) badges=\(dockBadges.count) "
                 + "targets=\(targets.count)"
         )
         return targets
+    }
+
+    private func rufSettingsTarget() -> SwitchTarget? {
+        let application = NSRunningApplication.current
+        guard
+            !application.isTerminated,
+            let bundleIdentifier = application.bundleIdentifier,
+            let name = application.localizedName,
+            let icon = ApplicationIconResolver.icon(for: application)
+        else {
+            return nil
+        }
+
+        return SwitchTarget(
+            item: ApplicationItem(
+                application: application,
+                bundleIdentifier: bundleIdentifier,
+                name: name,
+                icon: icon
+            ),
+            kind: .openRufSettings,
+            dockBadge: nil
+        )
     }
 
     private func applicationSnapshot() -> [ApplicationItem] {
