@@ -41,10 +41,6 @@ enum PerformanceLog {
     // looks. These records outlive the session that produced them.
     private static let file = isEnabled ? PerformanceLogFile() : nil
 
-    static var fileURL: URL? {
-        PerformanceLogFile.url
-    }
-
     // Diagnostics that have to sample state before they can format it -- window
     // geometry, screen membership, a WindowServer readback -- pay for the
     // sampling whether or not anyone is measuring. Gating only the message
