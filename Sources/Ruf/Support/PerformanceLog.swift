@@ -45,6 +45,18 @@ enum PerformanceLog {
         PerformanceLogFile.url
     }
 
+    // Diagnostics that have to sample state before they can format it -- window
+    // geometry, screen membership, a WindowServer readback -- pay for the
+    // sampling whether or not anyone is measuring. Gating only the message
+    // leaves that cost on the hot path, so the whole body is gated instead.
+    static func whenEnabled(_ body: () -> Void) {
+        guard isEnabled else {
+            return
+        }
+
+        body()
+    }
+
     static func begin(_ name: StaticString) -> Span {
         // Spans nest and run concurrently, so each interval needs its own
         // identifier; the shared `.exclusive` one cannot tell them apart.
