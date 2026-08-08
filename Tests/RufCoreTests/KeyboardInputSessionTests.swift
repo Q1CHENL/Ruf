@@ -588,20 +588,20 @@ final class KeyboardInputSessionTests: XCTestCase {
 
         XCTAssertEqual(decision, switcherDecision(.cancel))
         XCTAssertFalse(session.isCycling)
-        XCTAssertFalse(session.hasPendingSwitcherGesture)
+        XCTAssertNil(session.pendingSwitcherGestureToken)
     }
 
     func testPendingSwitcherGestureCanBeCancelledByItsDeadline() {
         var session = cyclingSession()
         _ = session.interpret(commandNInput(), capturesCommandTab: true)
 
-        XCTAssertTrue(session.hasPendingSwitcherGesture)
+        XCTAssertNotNil(session.pendingSwitcherGestureToken)
         XCTAssertEqual(
             session.cancelPendingSwitcherGesture(),
             .switcher(.cancel)
         )
         XCTAssertFalse(session.isCycling)
-        XCTAssertFalse(session.hasPendingSwitcherGesture)
+        XCTAssertNil(session.pendingSwitcherGestureToken)
         XCTAssertNil(session.cancelPendingSwitcherGesture())
     }
 
@@ -621,7 +621,7 @@ final class KeyboardInputSessionTests: XCTestCase {
 
         XCTAssertEqual(decision, switcherDecision(.move(.right)))
         XCTAssertTrue(session.isCycling)
-        XCTAssertFalse(session.hasPendingSwitcherGesture)
+        XCTAssertNil(session.pendingSwitcherGestureToken)
     }
 
     func testPendingSwitcherGestureYieldsToAnotherCycle() {
@@ -635,7 +635,7 @@ final class KeyboardInputSessionTests: XCTestCase {
 
         XCTAssertEqual(decision, switcherDecision(.cycle(backwards: false)))
         XCTAssertTrue(session.isCycling)
-        XCTAssertFalse(session.hasPendingSwitcherGesture)
+        XCTAssertNil(session.pendingSwitcherGestureToken)
     }
 
     func testPendingSwitcherGestureIsReplacedByADifferentGesture() {
@@ -646,7 +646,7 @@ final class KeyboardInputSessionTests: XCTestCase {
             session.interpret(commandQInput(), capturesCommandTab: true),
             KeyboardDecision(command: nil, isConsumed: true)
         )
-        XCTAssertTrue(session.hasPendingSwitcherGesture)
+        XCTAssertNotNil(session.pendingSwitcherGestureToken)
 
         _ = session.interpret(
             KeyboardInput(
@@ -681,7 +681,7 @@ final class KeyboardInputSessionTests: XCTestCase {
             decision,
             KeyboardDecision(command: nil, isConsumed: true)
         )
-        XCTAssertTrue(session.hasPendingSwitcherGesture)
+        XCTAssertNotNil(session.pendingSwitcherGestureToken)
 
         _ = session.interpret(
             KeyboardInput(

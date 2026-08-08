@@ -88,10 +88,6 @@ public struct KeyboardInputSession: Sendable {
     private var pendingSwitcherGesture: PendingSwitcherGesture?
     private var lastSwitcherGestureToken: UInt64 = 0
 
-    public var hasPendingSwitcherGesture: Bool {
-        pendingSwitcherGesture != nil
-    }
-
     /// Identifies the pending gesture so a caller timing it out can tell one
     /// gesture being replaced by another from the same gesture still waiting.
     public var pendingSwitcherGestureToken: UInt64? {
