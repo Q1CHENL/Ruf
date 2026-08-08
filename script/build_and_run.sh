@@ -8,15 +8,7 @@ BUNDLE_ID="com.qichen.ruf"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="$ROOT_DIR/dist"
-APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
-APP_DISK_IMAGE="$DIST_DIR/$APP_NAME.dmg"
-APP_CONTENTS="$APP_BUNDLE/Contents"
-APP_MACOS="$APP_CONTENTS/MacOS"
-APP_BINARY="$APP_MACOS/$APP_NAME"
-APP_FRAMEWORKS="$APP_CONTENTS/Frameworks"
-APP_RESOURCES="$APP_CONTENTS/Resources"
 APP_ICON_SOURCE="$ROOT_DIR/Resources/AppIcon/$APP_NAME.icon"
-SPARKLE_FRAMEWORK="$APP_FRAMEWORKS/Sparkle.framework"
 SPARKLE_TOOLS="$ROOT_DIR/.build/artifacts/sparkle/Sparkle/bin"
 SPARKLE_KEY_ACCOUNT="$BUNDLE_ID"
 REPOSITORY_URL="https://github.com/Q1CHENL/Ruf"
@@ -24,6 +16,21 @@ PERFORMANCE_LOG="$HOME/Library/Logs/$APP_NAME/performance.log"
 SELF_SIGNED_IDENTITY_NAME="Ruf Release Code Signing"
 SELF_SIGNED_IDENTITY_SHA1="979E44A42CA7D82F7C73198B826E5D469C4021A9"
 UNIVERSAL_ARCHS=(--arch arm64 --arch x86_64)
+
+set_artifact_paths() {
+    APP_BUNDLE="$1"
+    APP_DISK_IMAGE="$2"
+    APP_CONTENTS="$APP_BUNDLE/Contents"
+    APP_MACOS="$APP_CONTENTS/MacOS"
+    APP_BINARY="$APP_MACOS/$APP_NAME"
+    APP_FRAMEWORKS="$APP_CONTENTS/Frameworks"
+    APP_RESOURCES="$APP_CONTENTS/Resources"
+    SPARKLE_FRAMEWORK="$APP_FRAMEWORKS/Sparkle.framework"
+}
+
+set_artifact_paths \
+    "$DIST_DIR/$APP_NAME.app" \
+    "$DIST_DIR/$APP_NAME.dmg"
 
 stop_running_app() {
     local pid
@@ -470,14 +477,9 @@ package_for_distribution() (
     }
     trap cleanup_distribution EXIT
 
-    APP_BUNDLE="$release_directory/$APP_NAME.app"
-    APP_DISK_IMAGE="$release_directory/$APP_NAME.dmg"
-    APP_CONTENTS="$APP_BUNDLE/Contents"
-    APP_MACOS="$APP_CONTENTS/MacOS"
-    APP_BINARY="$APP_MACOS/$APP_NAME"
-    APP_FRAMEWORKS="$APP_CONTENTS/Frameworks"
-    APP_RESOURCES="$APP_CONTENTS/Resources"
-    SPARKLE_FRAMEWORK="$APP_FRAMEWORKS/Sparkle.framework"
+    set_artifact_paths \
+        "$release_directory/$APP_NAME.app" \
+        "$release_directory/$APP_NAME.dmg"
 
     assemble_app release "${UNIVERSAL_ARCHS[@]}"
     sign_application_for_distribution "$identity" "$release_kind"
