@@ -230,8 +230,6 @@ jobs:
           keychain_password="$(/usr/bin/uuidgen)-$(/usr/bin/uuidgen)"
           release_identity_sha1="979E44A42CA7D82F7C73198B826E5D469C4021A9"
           echo "RUF_RELEASE_KEYCHAIN=$keychain_path" >> "$GITHUB_ENV"
-          echo "RUF_RELEASE_CERTIFICATE_SHA1=$release_identity_sha1" \
-            >> "$GITHUB_ENV"
 
           /usr/bin/printf '%s' "$CERTIFICATE_P12_BASE64" \
             | /usr/bin/base64 --decode > "$certificate_path"
@@ -377,13 +375,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG_NAME: ${{ github.ref_name }}
         run: |
-          release_endpoint="repos/$GITHUB_REPOSITORY/releases/tags/$TAG_NAME"
-          if release_json="$(gh api "$release_endpoint" 2>/dev/null)"; then
-            if [[ "$(jq -r '.draft' <<< "$release_json")" != true ]]; then
+          if release_json="$(gh release view "$TAG_NAME" \
+            --json databaseId,isDraft,isPrerelease 2>/dev/null)"; then
+            if [[ "$(jq -r '.isDraft' <<< "$release_json")" != true ]]; then
               echo "Release $TAG_NAME is already published" >&2
               exit 1
             fi
-            if [[ "$(jq -r '.prerelease' <<< "$release_json")" != false ]]; then
+            if [[ "$(jq -r '.isPrerelease' <<< "$release_json")" != false ]]; then
               echo "Existing draft $TAG_NAME is unexpectedly marked as a prerelease" >&2
               exit 1
             fi
@@ -400,16 +398,29 @@ jobs:
               --notes-file "$RELEASE_BODY_PATH"
           fi
 
+          release_id="$(gh release view "$TAG_NAME" \
+            --json databaseId \
+            --jq '.databaseId')"
+          if [[ ! "$release_id" =~ ^[1-9][0-9]*$ ]]; then
+            echo "GitHub did not return a numeric release ID: $release_id" >&2
+            exit 1
+          fi
+          # The REST tag lookup does not expose draft releases. The numeric
+          # endpoint does, so use the ID that the CLI resolves through GraphQL.
+          release_endpoint="repos/$GITHUB_REPOSITORY/releases/$release_id"
+
           gh release upload "$TAG_NAME" \
             --clobber \
             dist/Ruf.dmg \
             dist/appcast.xml
 
           release_json="$(gh api "$release_endpoint")"
-          if ! jq -e \
-            '.draft == true and .prerelease == false and (.assets | length == 2)' \
-            <<< "$release_json" >/dev/null; then
-            echo "Draft release does not contain exactly the two expected assets" >&2
+          if ! jq -e '
+            .draft == true
+            and .prerelease == false
+            and ([.assets[].name] | sort == ["Ruf.dmg", "appcast.xml"])
+          ' <<< "$release_json" >/dev/null; then
+            echo "Draft release does not contain exactly the expected assets" >&2
             exit 1
           fi
 
@@ -440,20 +451,21 @@ jobs:
           done
 
           gh release edit "$TAG_NAME" --draft=false --latest
-          if [[ "$(gh api "$release_endpoint" --jq '.draft')" != false ]]; then
-            echo "Release $TAG_NAME was not published" >&2
+          is_draft="$(gh api "$release_endpoint" --jq '.draft')"
+          latest_tag="$(gh api \
+            "repos/$GITHUB_REPOSITORY/releases/latest" \
+            --jq '.tag_name')"
+          if [[ "$is_draft" != false || "$latest_tag" != "$TAG_NAME" ]]; then
+            echo "Release $TAG_NAME was not published as latest" >&2
             exit 1
           fi
 
       - name: Remove the temporary release keychain
         if: always()
         run: |
-          if [[ -n "${RUF_RELEASE_CERTIFICATE_SHA1:-}" ]]; then
-            /usr/bin/sudo /usr/bin/security delete-certificate \
-              -Z "$RUF_RELEASE_CERTIFICATE_SHA1" \
-              -t \
-              /Library/Keychains/System.keychain || true
-          fi
+          # GitHub-hosted jobs run on disposable VMs. Removing admin trust
+          # invokes macOS's interactive trust-settings path and can hang a
+          # headless runner, while the VM teardown removes it unconditionally.
           if [[ -n "${RUF_RELEASE_KEYCHAIN:-}" ]]; then
             /usr/bin/security delete-keychain "$RUF_RELEASE_KEYCHAIN" || true
           fi
