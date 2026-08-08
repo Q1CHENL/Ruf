@@ -33,10 +33,11 @@ To create an optimized universal build without launching Ruf, run
 `./script/build_and_run.sh --package`. This produces ad-hoc-signed local
 artifacts at `dist/Ruf.app` and `dist/Ruf.dmg`.
 
-Without a Developer ID, import the pinned self-signed Code Signing identity
-named `Ruf Release Code Signing` into the login Keychain. The release maintainer
-must back up its certificate and private key as a password-protected `.p12`
-outside the repository. Then run:
+Without a Developer ID, Ruf uses the pinned self-signed Code Signing identity
+named `Ruf Release Code Signing`. The release maintainer must back up its
+certificate and private key as a password-protected `.p12` outside the
+repository. To validate that packaging path locally, import the identity into
+the login Keychain and run:
 
 ```sh
 ./script/build_and_run.sh --release-self-signed
@@ -56,11 +57,35 @@ RUF_NOTARY_PROFILE="ruf-notary" \
 ./script/build_and_run.sh --release-notarized
 ```
 
-Generating the signed Sparkle feed is a separate release step:
+Public releases are automated from version tags. Before tagging a release:
 
-```sh
-./script/build_and_run.sh --appcast
-```
+1. Update `CFBundleShortVersionString` and increment `CFBundleVersion` in
+   `Resources/Info.plist`.
+2. Copy `.github/release-notes/TEMPLATE.md` to
+   `.github/release-notes/vMAJOR.MINOR.PATCH.md` and replace its placeholder
+   with concise, user-visible changes.
+3. Commit those files, then push the matching tag:
 
-This updates `dist/appcast.xml` from validated release artifacts and may ask for
-access to the Sparkle signing key in Keychain.
+   ```sh
+   git tag vMAJOR.MINOR.PATCH
+   git push origin vMAJOR.MINOR.PATCH
+   ```
+
+The tag triggers `.github/workflows/release.yml`, which validates the version
+and previous appcast, builds and tests Ruf, creates the self-signed universal
+DMG, signs the Sparkle update, and publishes both files through a draft GitHub
+Release. Ordinary pushes to `main` run CI but never publish a release.
+
+The workflow reads these secrets from the `release` GitHub environment:
+
+- `RUF_CODESIGN_CERTIFICATE_P12`: the base64-encoded pinned self-signed `.p12`
+- `RUF_CODESIGN_CERTIFICATE_PASSWORD`: the `.p12` export password
+- `RUF_SPARKLE_PRIVATE_KEY`: the private key exported by Sparkle's
+  `generate_keys --account com.qichen.ruf -x` command
+
+Create that environment before pushing the first automated release tag. Keep
+it approval-free for automatic publication, restrict deployments to release
+tags, and limit tag creation to maintainers through a repository ruleset.
+
+Until the release workflow moves to Developer ID signing, automated releases
+remain self-signed and are not notarized.

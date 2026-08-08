@@ -1,0 +1,446 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ruf-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-26
+    timeout-minutes: 45
+    environment: release
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Validate release metadata
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          if [[ ! "$TAG_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Release tags must use the vMAJOR.MINOR.PATCH format: $TAG_NAME" >&2
+            exit 1
+          fi
+
+          release_version="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
+          bundle_version="$(/usr/libexec/PlistBuddy \
+            -c 'Print :CFBundleShortVersionString' Resources/Info.plist)"
+          bundle_build="$(/usr/libexec/PlistBuddy \
+            -c 'Print :CFBundleVersion' Resources/Info.plist)"
+          notes_path=".github/release-notes/$TAG_NAME.md"
+
+          if [[ "$release_version" != "$bundle_version" ]]; then
+            echo "Tag $TAG_NAME does not match bundle version $bundle_version" >&2
+            exit 1
+          fi
+          if [[ ! "$bundle_build" =~ ^[1-9][0-9]*$ ]]; then
+            echo "CFBundleVersion must be a positive integer: $bundle_build" >&2
+            exit 1
+          fi
+          if [[ ! -s "$notes_path" ]]; then
+            echo "Release notes are missing: $notes_path" >&2
+            exit 1
+          fi
+          if /usr/bin/grep -Fq 'REPLACE_WITH_USER_VISIBLE_CHANGE' "$notes_path"; then
+            echo "Release notes still contain the template placeholder" >&2
+            exit 1
+          fi
+          if ! /usr/bin/grep -Eq '^[[:space:]]*[-*][[:space:]]+' "$notes_path"; then
+            echo "Release notes must contain at least one user-visible bullet" >&2
+            exit 1
+          fi
+
+          git fetch --no-tags origin "$DEFAULT_BRANCH"
+          release_commit="$(git rev-list -n 1 "$TAG_NAME")"
+          if ! git merge-base --is-ancestor \
+            "$release_commit" "origin/$DEFAULT_BRANCH"; then
+            echo "Release tag must point to a commit on $DEFAULT_BRANCH" >&2
+            exit 1
+          fi
+
+          {
+            echo "RELEASE_VERSION=$release_version"
+            echo "RELEASE_BUILD=$bundle_build"
+            echo "RELEASE_NOTES_PATH=$notes_path"
+          } >> "$GITHUB_ENV"
+
+      - name: Download and validate the previous appcast
+        env:
+          APPCAST_URL: https://github.com/Q1CHENL/Ruf/releases/latest/download/appcast.xml
+        run: |
+          previous_appcast="$RUNNER_TEMP/previous-appcast.xml"
+          /usr/bin/curl \
+            --fail \
+            --location \
+            --retry 3 \
+            --retry-delay 2 \
+            --output "$previous_appcast" \
+            "$APPCAST_URL"
+          /usr/bin/xmllint --noout "$previous_appcast"
+
+          previous_builds="$(/usr/bin/xmllint \
+            --xpath '//*[local-name()="version"]/text()' \
+            "$previous_appcast")"
+          previous_versions="$(/usr/bin/xmllint \
+            --xpath '//*[local-name()="shortVersionString"]/text()' \
+            "$previous_appcast")"
+          previous_latest_version="$(/usr/bin/xmllint \
+            --xpath 'string((//*[local-name()="shortVersionString"])[1])' \
+            "$previous_appcast")"
+          previous_max_build=0
+
+          while IFS= read -r previous_build; do
+            if [[ ! "$previous_build" =~ ^[1-9][0-9]*$ ]]; then
+              echo "The published appcast contains an invalid build: $previous_build" >&2
+              exit 1
+            fi
+            if (( previous_build > previous_max_build )); then
+              previous_max_build="$previous_build"
+            fi
+          done <<< "$previous_builds"
+
+          if (( RELEASE_BUILD <= previous_max_build )); then
+            echo "CFBundleVersion $RELEASE_BUILD must exceed published build $previous_max_build" >&2
+            exit 1
+          fi
+          if /usr/bin/grep -Fxq "$RELEASE_VERSION" <<< "$previous_versions"; then
+            echo "Version $RELEASE_VERSION already exists in the published appcast" >&2
+            exit 1
+          fi
+          if [[ ! "$previous_latest_version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "The published appcast has an invalid version: $previous_latest_version" >&2
+            exit 1
+          fi
+
+          IFS=. read -r release_major release_minor release_patch \
+            <<< "$RELEASE_VERSION"
+          IFS=. read -r previous_major previous_minor previous_patch \
+            <<< "$previous_latest_version"
+          if (( release_major < previous_major \
+            || (release_major == previous_major && release_minor < previous_minor) \
+            || (release_major == previous_major \
+              && release_minor == previous_minor \
+              && release_patch <= previous_patch) )); then
+            echo "Version $RELEASE_VERSION must be newer than $previous_latest_version" >&2
+            exit 1
+          fi
+
+          /bin/mkdir -p dist
+          /bin/cp "$previous_appcast" dist/appcast.xml
+
+      - name: Build and test with strict warnings
+        run: |
+          swift build -Xswiftc -warnings-as-errors
+          swift test -Xswiftc -warnings-as-errors
+
+      - name: Verify the Sparkle signing key
+        env:
+          RUF_SPARKLE_PRIVATE_KEY: ${{ secrets.RUF_SPARKLE_PRIVATE_KEY }}
+        run: |
+          if [[ -z "$RUF_SPARKLE_PRIVATE_KEY" ]]; then
+            echo "The release environment is missing RUF_SPARKLE_PRIVATE_KEY" >&2
+            exit 1
+          fi
+
+          previous_appcast="$RUNNER_TEMP/previous-appcast.xml"
+          previous_dmg="$RUNNER_TEMP/previous-Ruf.dmg"
+          previous_dmg_url="$(/usr/bin/xmllint \
+            --xpath 'string((//*[local-name()="item"])[1]/*[local-name()="enclosure"]/@url)' \
+            "$previous_appcast")"
+          previous_signature="$(/usr/bin/xmllint \
+            --xpath 'string((//*[local-name()="item"])[1]/*[local-name()="enclosure"]/@*[local-name()="edSignature"])' \
+            "$previous_appcast")"
+
+          case "$previous_dmg_url" in
+            https://github.com/Q1CHENL/Ruf/releases/download/v*/Ruf.dmg)
+              ;;
+            *)
+              echo "The previous appcast has an unexpected DMG URL: $previous_dmg_url" >&2
+              exit 1
+              ;;
+          esac
+          if [[ -z "$previous_signature" ]]; then
+            echo "The previous appcast has no Sparkle signature" >&2
+            exit 1
+          fi
+
+          /usr/bin/curl \
+            --fail \
+            --location \
+            --retry 3 \
+            --retry-delay 2 \
+            --output "$previous_dmg" \
+            "$previous_dmg_url"
+          /usr/bin/printf '%s\n' "$RUF_SPARKLE_PRIVATE_KEY" \
+            | .build/artifacts/sparkle/Sparkle/bin/sign_update \
+                --verify \
+                --ed-key-file - \
+                "$previous_dmg" \
+                "$previous_signature"
+
+          mount_point="$RUNNER_TEMP/previous-ruf"
+          /bin/mkdir -p "$mount_point"
+          cleanup_mount() {
+            /usr/sbin/diskutil eject "$mount_point" >/dev/null 2>&1 || true
+          }
+          trap cleanup_mount EXIT
+          /usr/sbin/diskutil image attach \
+            --readOnly \
+            --nobrowse \
+            --mountPoint "$mount_point" \
+            "$previous_dmg" >/dev/null
+
+          previous_public_key="$(/usr/libexec/PlistBuddy \
+            -c 'Print :SUPublicEDKey' \
+            "$mount_point/Ruf.app/Contents/Info.plist")"
+          current_public_key="$(/usr/libexec/PlistBuddy \
+            -c 'Print :SUPublicEDKey' Resources/Info.plist)"
+          if [[ "$current_public_key" != "$previous_public_key" ]]; then
+            echo "SUPublicEDKey does not match the previous release" >&2
+            exit 1
+          fi
+
+          cleanup_mount
+          trap - EXIT
+
+      - name: Import the release signing identity
+        env:
+          CERTIFICATE_PASSWORD: ${{ secrets.RUF_CODESIGN_CERTIFICATE_PASSWORD }}
+          CERTIFICATE_P12_BASE64: ${{ secrets.RUF_CODESIGN_CERTIFICATE_P12 }}
+        run: |
+          if [[ -z "$CERTIFICATE_P12_BASE64" || -z "$CERTIFICATE_PASSWORD" ]]; then
+            echo "The release environment is missing the code-signing certificate secrets" >&2
+            exit 1
+          fi
+
+          certificate_path="$RUNNER_TEMP/ruf-release.p12"
+          certificate_pem="$RUNNER_TEMP/ruf-release.pem"
+          keychain_path="$RUNNER_TEMP/ruf-release.keychain-db"
+          keychain_password="$(/usr/bin/uuidgen)-$(/usr/bin/uuidgen)"
+          echo "RUF_RELEASE_KEYCHAIN=$keychain_path" >> "$GITHUB_ENV"
+
+          /usr/bin/printf '%s' "$CERTIFICATE_P12_BASE64" \
+            | /usr/bin/base64 --decode > "$certificate_path"
+          /usr/bin/security create-keychain \
+            -p "$keychain_password" "$keychain_path"
+          /usr/bin/security set-keychain-settings \
+            -lut 21600 "$keychain_path"
+          /usr/bin/security unlock-keychain \
+            -p "$keychain_password" "$keychain_path"
+          /usr/bin/security import "$certificate_path" \
+            -k "$keychain_path" \
+            -P "$CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign
+          /usr/bin/security find-certificate \
+            -c 'Ruf Release Code Signing' \
+            -p "$keychain_path" > "$certificate_pem"
+          /usr/bin/security add-trusted-cert \
+            -r trustRoot \
+            -p codeSign \
+            -k "$keychain_path" \
+            "$certificate_pem"
+          /usr/bin/security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s \
+            -k "$keychain_password" \
+            "$keychain_path"
+          /usr/bin/security list-keychains \
+            -d user \
+            -s "$keychain_path"
+          /usr/bin/security default-keychain \
+            -d user \
+            -s "$keychain_path"
+          /bin/rm -f "$certificate_path" "$certificate_pem"
+
+      - name: Build the self-signed release
+        env:
+          RUF_STRICT_WARNINGS: "1"
+        run: ./script/build_and_run.sh --release-self-signed
+
+      - name: Generate the signed appcast
+        env:
+          RUF_SPARKLE_PRIVATE_KEY: ${{ secrets.RUF_SPARKLE_PRIVATE_KEY }}
+        run: ./script/build_and_run.sh --appcast
+
+      - name: Validate release artifacts
+        env:
+          RUF_SPARKLE_PRIVATE_KEY: ${{ secrets.RUF_SPARKLE_PRIVATE_KEY }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          /usr/bin/codesign --verify --deep --strict --verbose=2 dist/Ruf.app
+          /usr/bin/codesign --verify --verbose=2 dist/Ruf.dmg
+          /usr/bin/hdiutil verify dist/Ruf.dmg
+
+          architectures="$(/usr/bin/lipo -archs dist/Ruf.app/Contents/MacOS/Ruf)"
+          [[ "$architectures" == *arm64* ]]
+          [[ "$architectures" == *x86_64* ]]
+          /usr/bin/xmllint --noout dist/appcast.xml
+
+          appcast_version="$(/usr/bin/xmllint \
+            --xpath 'string((//*[local-name()="shortVersionString"])[1])' \
+            dist/appcast.xml)"
+          appcast_build="$(/usr/bin/xmllint \
+            --xpath 'string((//*[local-name()="version"])[1])' \
+            dist/appcast.xml)"
+          appcast_url="$(/usr/bin/xmllint \
+            --xpath 'string((//*[local-name()="item"])[1]/*[local-name()="enclosure"]/@url)' \
+            dist/appcast.xml)"
+          appcast_length="$(/usr/bin/xmllint \
+            --xpath 'string((//*[local-name()="item"])[1]/*[local-name()="enclosure"]/@length)' \
+            dist/appcast.xml)"
+          appcast_signature="$(/usr/bin/xmllint \
+            --xpath 'string((//*[local-name()="item"])[1]/*[local-name()="enclosure"]/@*[local-name()="edSignature"])' \
+            dist/appcast.xml)"
+          expected_url="https://github.com/Q1CHENL/Ruf/releases/download/$TAG_NAME/Ruf.dmg"
+          dmg_length="$(/usr/bin/stat -f '%z' dist/Ruf.dmg)"
+
+          if [[ "$appcast_version" != "$RELEASE_VERSION" \
+            || "$appcast_build" != "$RELEASE_BUILD" ]]; then
+            echo "The generated appcast does not describe the tagged build" >&2
+            exit 1
+          fi
+          if [[ "$appcast_url" != "$expected_url" ]]; then
+            echo "The generated appcast has the wrong DMG URL: $appcast_url" >&2
+            exit 1
+          fi
+          if [[ "$appcast_length" != "$dmg_length" ]]; then
+            echo "The generated appcast has the wrong DMG length" >&2
+            exit 1
+          fi
+          if [[ -z "$appcast_signature" ]]; then
+            echo "The generated appcast has no Sparkle signature" >&2
+            exit 1
+          fi
+
+          previous_version="$(/usr/bin/xmllint \
+            --xpath 'string((//*[local-name()="shortVersionString"])[1])' \
+            "$RUNNER_TEMP/previous-appcast.xml")"
+          generated_versions="$(/usr/bin/xmllint \
+            --xpath '//*[local-name()="shortVersionString"]/text()' \
+            dist/appcast.xml)"
+          if ! /usr/bin/grep -Fxq "$previous_version" <<< "$generated_versions"; then
+            echo "The generated appcast dropped the previous release" >&2
+            exit 1
+          fi
+
+          /usr/bin/printf '%s\n' "$RUF_SPARKLE_PRIVATE_KEY" \
+            | .build/artifacts/sparkle/Sparkle/bin/sign_update \
+                --verify \
+                --ed-key-file - \
+                dist/Ruf.dmg \
+                "$appcast_signature"
+
+      - name: Prepare release notes
+        run: |
+          release_notes="$RUNNER_TEMP/release-notes.md"
+          {
+            echo 'A lightweight macOS app and window switcher with a matrix layout and keyboard-first window controls.'
+            echo
+            echo '## What is new'
+            echo
+            /bin/cat "$RELEASE_NOTES_PATH"
+            echo
+            echo '## Installation'
+            echo
+            echo '1. Download Ruf.dmg.'
+            echo '2. Drag Ruf to Applications.'
+            echo '3. Open Ruf. Because this build is self-signed and not notarized, macOS may require you to allow it from System Settings → Privacy & Security → Open Anyway.'
+            echo '4. Grant Ruf Accessibility permission when prompted.'
+            echo
+            echo 'Requires macOS 26 or later.'
+          } > "$release_notes"
+          echo "RELEASE_BODY_PATH=$release_notes" >> "$GITHUB_ENV"
+
+      - name: Upload and publish the GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          release_endpoint="repos/$GITHUB_REPOSITORY/releases/tags/$TAG_NAME"
+          if release_json="$(gh api "$release_endpoint" 2>/dev/null)"; then
+            if [[ "$(jq -r '.draft' <<< "$release_json")" != true ]]; then
+              echo "Release $TAG_NAME is already published" >&2
+              exit 1
+            fi
+            if [[ "$(jq -r '.prerelease' <<< "$release_json")" != false ]]; then
+              echo "Existing draft $TAG_NAME is unexpectedly marked as a prerelease" >&2
+              exit 1
+            fi
+            gh release edit "$TAG_NAME" \
+              --draft \
+              --title "Ruf $TAG_NAME" \
+              --notes-file "$RELEASE_BODY_PATH"
+          else
+            gh release create "$TAG_NAME" \
+              --verify-tag \
+              --fail-on-no-commits \
+              --draft \
+              --title "Ruf $TAG_NAME" \
+              --notes-file "$RELEASE_BODY_PATH"
+          fi
+
+          gh release upload "$TAG_NAME" \
+            --clobber \
+            dist/Ruf.dmg \
+            dist/appcast.xml
+
+          release_json="$(gh api "$release_endpoint")"
+          if ! jq -e \
+            '.draft == true and .prerelease == false and (.assets | length == 2)' \
+            <<< "$release_json" >/dev/null; then
+            echo "Draft release does not contain exactly the two expected assets" >&2
+            exit 1
+          fi
+
+          for asset_path in dist/Ruf.dmg dist/appcast.xml; do
+            asset_name="$(/usr/bin/basename "$asset_path")"
+            local_size="$(/usr/bin/stat -f '%z' "$asset_path")"
+            local_digest="sha256:$(/usr/bin/shasum -a 256 "$asset_path" \
+              | /usr/bin/awk '{print $1}')"
+            remote_size="$(jq -r \
+              --arg name "$asset_name" \
+              '.assets[] | select(.name == $name) | .size' \
+              <<< "$release_json")"
+            remote_digest="$(jq -r \
+              --arg name "$asset_name" \
+              '.assets[] | select(.name == $name) | .digest' \
+              <<< "$release_json")"
+            remote_state="$(jq -r \
+              --arg name "$asset_name" \
+              '.assets[] | select(.name == $name) | .state' \
+              <<< "$release_json")"
+
+            if [[ "$remote_size" != "$local_size" \
+              || "$remote_digest" != "$local_digest" \
+              || "$remote_state" != uploaded ]]; then
+              echo "Uploaded asset does not match $asset_path" >&2
+              exit 1
+            fi
+          done
+
+          gh release edit "$TAG_NAME" --draft=false --latest
+          if [[ "$(gh api "$release_endpoint" --jq '.draft')" != false ]]; then
+            echo "Release $TAG_NAME was not published" >&2
+            exit 1
+          fi
+
+      - name: Remove the temporary release keychain
+        if: always()
+        run: |
+          if [[ -n "${RUF_RELEASE_KEYCHAIN:-}" ]]; then
+            /usr/bin/security delete-keychain "$RUF_RELEASE_KEYCHAIN" || true
+          fi
+          /bin/rm -f \
+            "$RUNNER_TEMP/ruf-release.p12" \
+            "$RUNNER_TEMP/ruf-release.pem"

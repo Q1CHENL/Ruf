@@ -313,6 +313,7 @@ compile_app_icon() {
 
 generate_appcast() {
     local appcast_path="$DIST_DIR/appcast.xml"
+    local -a generate_appcast_arguments
     local signing_kind
     local staging_directory
     local version
@@ -349,11 +350,23 @@ generate_appcast() {
                 "$staging_directory/appcast.xml"
         fi
 
-        "$SPARKLE_TOOLS/generate_appcast" \
-            --account "$SPARKLE_KEY_ACCOUNT" \
-            --download-url-prefix "$REPOSITORY_URL/releases/download/v$version/" \
-            --link "$REPOSITORY_URL" \
-            "$staging_directory"
+        generate_appcast_arguments=(
+            --download-url-prefix "$REPOSITORY_URL/releases/download/v$version/"
+            --link "$REPOSITORY_URL"
+        )
+
+        if [[ -n "${RUF_SPARKLE_PRIVATE_KEY:-}" ]]; then
+            /usr/bin/printf '%s\n' "$RUF_SPARKLE_PRIVATE_KEY" \
+                | "$SPARKLE_TOOLS/generate_appcast" \
+                    --ed-key-file - \
+                    "${generate_appcast_arguments[@]}" \
+                    "$staging_directory"
+        else
+            "$SPARKLE_TOOLS/generate_appcast" \
+                --account "$SPARKLE_KEY_ACCOUNT" \
+                "${generate_appcast_arguments[@]}" \
+                "$staging_directory"
+        fi
 
         if [[ ! -s "$staging_directory/appcast.xml" ]]; then
             echo "Sparkle did not generate an appcast" >&2
