@@ -12,6 +12,7 @@ public final class AppPreferences {
     private enum Key {
         static let launchAtLoginConfigured = "launchAtLoginConfigured"
         static let switcherMode = "switcherMode"
+        static let windowMovementEnabled = "windowMovementEnabled"
     }
 
     private let defaults: UserDefaults
@@ -23,6 +24,19 @@ public final class AppPreferences {
             }
 
             defaults.set(switcherMode.rawValue, forKey: Key.switcherMode)
+        }
+    }
+
+    public var isWindowMovementEnabled: Bool {
+        didSet {
+            guard isWindowMovementEnabled != oldValue else {
+                return
+            }
+
+            defaults.set(
+                isWindowMovementEnabled,
+                forKey: Key.windowMovementEnabled
+            )
         }
     }
 
@@ -38,6 +52,9 @@ public final class AppPreferences {
         self.defaults = defaults
         switcherMode = defaults.string(forKey: Key.switcherMode)
             .flatMap(AppSwitcherMode.init(rawValue:)) ?? .ruf
+        isWindowMovementEnabled = defaults.object(
+            forKey: Key.windowMovementEnabled
+        ) as? Bool ?? true
     }
 
     public func markLaunchAtLoginConfigured() {

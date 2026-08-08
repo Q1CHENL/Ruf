@@ -19,15 +19,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     )
 
     private lazy var keyboardEventTap = KeyboardEventTap(
-        capturesCommandTab: preferences.switcherMode == .ruf
+        capturesCommandTab: preferences.switcherMode == .ruf,
+        capturesWindowMovement: preferences.isWindowMovementEnabled
     ) { [weak self] command in
         self?.handle(command)
     }
 
     private lazy var settingsWindowController = SettingsWindowController(
         preferences: preferences,
-        onSwitcherModeChanged: { [weak self] in
-            self?.switcherModeDidChange()
+        onKeyboardCaptureChanged: { [weak self] in
+            self?.keyboardCapturePreferencesDidChange()
         }
     )
 
@@ -52,12 +53,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         enableLaunchAtLoginByDefaultIfNeeded()
         installStatusItem()
         panelController.prepare(itemCount: 0)
-        applySwitcherMode()
+        applyKeyboardCapturePreferences()
         softwareUpdateController.startUpdater()
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
-        if !keyboardEventTap.isRunning {
+        if requiresKeyboardEventTap, !keyboardEventTap.isRunning {
             refreshKeyboardCaptureState(
                 accessibilityGranted: AccessibilityPermission.isGranted
             )
@@ -351,7 +352,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func updateAccessibilityMenuItem(accessibilityGranted: Bool) {
-        if keyboardEventTap.isRunning {
+        if !requiresKeyboardEventTap || keyboardEventTap.isRunning {
             accessibilityMenuItem?.isHidden = true
         } else {
             accessibilityMenuItem?.isHidden = false
@@ -362,11 +363,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func refreshKeyboardCaptureState(accessibilityGranted: Bool) {
-        keyboardEventTap.setCapturesCommandTab(
-            preferences.switcherMode == .ruf
+        keyboardEventTap.setCaptureState(
+            capturesCommandTab: preferences.switcherMode == .ruf,
+            capturesWindowMovement: preferences.isWindowMovementEnabled
         )
 
-        if accessibilityGranted {
+        if !requiresKeyboardEventTap {
+            stopPermissionMonitoring()
+            keyboardEventTap.stop()
+        } else if accessibilityGranted {
             stopPermissionMonitoring()
             keyboardEventTap.start()
         } else {
@@ -376,7 +381,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateAccessibilityMenuItem(accessibilityGranted: accessibilityGranted)
     }
 
-    private func applySwitcherMode() {
+    private func applyKeyboardCapturePreferences() {
         if preferences.switcherMode == .system,
            model.isPresented || loadingSession.isLoading {
             cancelSwitcher()
@@ -385,9 +390,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let accessibilityGranted = AccessibilityPermission.isGranted
         refreshKeyboardCaptureState(accessibilityGranted: accessibilityGranted)
 
-        if !accessibilityGranted {
+        if requiresKeyboardEventTap, !accessibilityGranted {
             requestAccessibility(openSystemSettings: false)
         }
+    }
+
+    private var requiresKeyboardEventTap: Bool {
+        preferences.switcherMode == .ruf
+            || preferences.isWindowMovementEnabled
     }
 
     private func requestAccessibility(openSystemSettings: Bool) {
@@ -452,8 +462,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateAccessibilityMenuItem(accessibilityGranted: accessibilityGranted)
     }
 
-    private func switcherModeDidChange() {
-        applySwitcherMode()
+    private func keyboardCapturePreferencesDidChange() {
+        applyKeyboardCapturePreferences()
     }
 
     private func enableLaunchAtLoginByDefaultIfNeeded() {

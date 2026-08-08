@@ -29,6 +29,23 @@ final class AppPreferencesTests: XCTestCase {
     }
 
     @MainActor
+    func testWindowMovementDefaultsOnAndPersistsOptOut() {
+        let suiteName = "AppPreferencesTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let preferences = AppPreferences(defaults: defaults)
+
+        XCTAssertTrue(preferences.isWindowMovementEnabled)
+
+        preferences.isWindowMovementEnabled = false
+
+        let reloadedPreferences = AppPreferences(defaults: defaults)
+
+        XCTAssertFalse(reloadedPreferences.isWindowMovementEnabled)
+    }
+
+    @MainActor
     func testLaunchAtLoginIsEnabledByDefaultOnlyUntilConfigured() {
         let suiteName = "AppPreferencesTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

@@ -5,7 +5,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @Bindable var preferences: AppPreferences
-    let onSwitcherModeChanged: () -> Void
+    let onKeyboardCaptureChanged: () -> Void
 
     var body: some View {
         Form {
@@ -45,10 +45,20 @@ struct SettingsView: View {
                 }
                 .opacity(preferences.switcherMode == .ruf ? 1 : 0.45)
 
-                ShortcutRow(
-                    "Move current window between displays",
-                    keys: "⌃⌥⌘ + ← ↑ ↓ →"
-                )
+                LabeledContent("Move current window between displays") {
+                    HStack(spacing: 12) {
+                        Text("⌃⌥⌘ + ← ↑ ↓ →")
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+
+                        Toggle(
+                            "Move current window between displays",
+                            isOn: $preferences.isWindowMovementEnabled
+                        )
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                    }
+                }
             } header: {
                 Text("Keyboard Shortcuts")
             } footer: {
@@ -66,9 +76,12 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 480, height: 400)
+        .frame(width: 480, height: 440)
         .onChange(of: preferences.switcherMode) {
-            onSwitcherModeChanged()
+            onKeyboardCaptureChanged()
+        }
+        .onChange(of: preferences.isWindowMovementEnabled) {
+            onKeyboardCaptureChanged()
         }
     }
 }

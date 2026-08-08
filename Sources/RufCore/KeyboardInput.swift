@@ -102,7 +102,8 @@ public struct KeyboardInputSession: Sendable {
 
     public mutating func interpret(
         _ input: KeyboardInput,
-        capturesCommandTab: Bool
+        capturesCommandTab: Bool,
+        capturesWindowMovement: Bool = true
     ) -> KeyboardDecision {
         if let pendingSwitcherGesture {
             if let decision = continueSwitcherGesture(
@@ -132,7 +133,8 @@ public struct KeyboardInputSession: Sendable {
 
         let decision = decision(
             for: input,
-            capturesCommandTab: capturesCommandTab
+            capturesCommandTab: capturesCommandTab,
+            capturesWindowMovement: capturesWindowMovement
         )
 
         updateSession(for: decision)
@@ -232,7 +234,8 @@ public struct KeyboardInputSession: Sendable {
 
     private func decision(
         for input: KeyboardInput,
-        capturesCommandTab: Bool
+        capturesCommandTab: Bool,
+        capturesWindowMovement: Bool
     ) -> KeyboardDecision {
         if input.kind == .flagsChanged {
             let command: KeyboardCommand? = isCycling
@@ -248,7 +251,8 @@ public struct KeyboardInputSession: Sendable {
             .command,
         ]
 
-        if !isCycling,
+        if capturesWindowMovement,
+           !isCycling,
            input.kind == .keyDown,
            input.modifiers == windowMoveModifiers,
            let direction = windowMoveDirection(for: input.keyCode) {

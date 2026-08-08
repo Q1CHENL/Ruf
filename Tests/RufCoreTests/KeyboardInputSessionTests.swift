@@ -491,7 +491,29 @@ final class KeyboardInputSessionTests: XCTestCase {
         )
     }
 
-    func testWindowMovementChordStillNavigatesAnOpenSwitcher() {
+    func testDisabledWindowMovementShortcutPassesThrough() {
+        for isRepeat in [false, true] {
+            var session = KeyboardInputSession()
+
+            let decision = session.interpret(
+                KeyboardInput(
+                    kind: .keyDown,
+                    keyCode: KeyboardKeyCode.rightArrow,
+                    modifiers: [.control, .option, .command],
+                    isRepeat: isRepeat
+                ),
+                capturesCommandTab: true,
+                capturesWindowMovement: false
+            )
+
+            XCTAssertEqual(
+                decision,
+                KeyboardDecision(command: nil, isConsumed: false)
+            )
+        }
+    }
+
+    func testDisabledWindowMovementChordStillNavigatesAnOpenSwitcher() {
         var session = cyclingSession()
 
         let decision = session.interpret(
@@ -501,7 +523,8 @@ final class KeyboardInputSessionTests: XCTestCase {
                 modifiers: [.control, .option, .command],
                 isRepeat: false
             ),
-            capturesCommandTab: true
+            capturesCommandTab: true,
+            capturesWindowMovement: false
         )
 
         XCTAssertEqual(decision, switcherDecision(.move(.right)))

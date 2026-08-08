@@ -88,6 +88,7 @@ final class KeyboardEventTap {
     private var inputSession = KeyboardInputSession()
     private var pendingGestureTimeoutTask: Task<Void, Never>?
     private var capturesCommandTab: Bool
+    private var capturesWindowMovement: Bool
 
     fileprivate var isCycling: Bool {
         inputSession.isCycling
@@ -103,9 +104,11 @@ final class KeyboardEventTap {
 
     init(
         capturesCommandTab: Bool,
+        capturesWindowMovement: Bool,
         commandHandler: @escaping (KeyboardCommand) -> Void
     ) {
         self.capturesCommandTab = capturesCommandTab
+        self.capturesWindowMovement = capturesWindowMovement
         self.commandHandler = commandHandler
     }
 
@@ -158,13 +161,22 @@ final class KeyboardEventTap {
         inputSession.reset()
     }
 
-    func setCapturesCommandTab(_ capturesCommandTab: Bool) {
-        guard self.capturesCommandTab != capturesCommandTab else {
+    func setCaptureState(
+        capturesCommandTab: Bool,
+        capturesWindowMovement: Bool
+    ) {
+        let commandTabChanged = self.capturesCommandTab != capturesCommandTab
+        let windowMovementChanged = self.capturesWindowMovement
+            != capturesWindowMovement
+        guard commandTabChanged || windowMovementChanged else {
             return
         }
 
-        resetInputSession()
+        if commandTabChanged {
+            resetInputSession()
+        }
         self.capturesCommandTab = capturesCommandTab
+        self.capturesWindowMovement = capturesWindowMovement
     }
 
     private func tearDownEventTap() {
@@ -222,7 +234,8 @@ final class KeyboardEventTap {
                 isRepeat: isRepeat,
                 characters: characters
             ),
-            capturesCommandTab: capturesCommandTab
+            capturesCommandTab: capturesCommandTab,
+            capturesWindowMovement: capturesWindowMovement
         )
         synchronizePendingGestureTimeout(previousToken: previousGestureToken)
 

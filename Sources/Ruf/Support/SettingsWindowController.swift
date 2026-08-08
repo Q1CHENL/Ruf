@@ -8,12 +8,12 @@ final class SettingsWindowController {
 
     init(
         preferences: AppPreferences,
-        onSwitcherModeChanged: @escaping () -> Void
+        onKeyboardCaptureChanged: @escaping () -> Void
     ) {
         let hostingController = NSHostingController(
             rootView: SettingsView(
                 preferences: preferences,
-                onSwitcherModeChanged: onSwitcherModeChanged
+                onKeyboardCaptureChanged: onKeyboardCaptureChanged
             )
         )
         let window = NSWindow(contentViewController: hostingController)
