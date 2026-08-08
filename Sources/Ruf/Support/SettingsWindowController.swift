@@ -60,9 +60,12 @@ final class SettingsWindowController {
                 onQuit: onQuit
             )
         )
+        hostingController.sizingOptions = [.preferredContentSize]
         let window = SettingsWindow(contentViewController: hostingController)
         window.title = "Ruf Settings"
         window.styleMask = [.titled, .closable]
+        window.titlebarAppearsTransparent = true
+        window.titlebarSeparatorStyle = .none
         window.isReleasedWhenClosed = false
         window.tabbingMode = .disallowed
         window.standardWindowButton(.closeButton)?.keyEquivalent = "w"

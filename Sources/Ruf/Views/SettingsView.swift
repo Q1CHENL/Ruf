@@ -114,7 +114,8 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 520, height: 620)
+        .frame(width: 520)
+        .fixedSize(horizontal: false, vertical: true)
         .onChange(of: preferences.switcherMode) {
             onPreferencesChanged()
         }
