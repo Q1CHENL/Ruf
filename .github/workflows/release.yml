@@ -225,9 +225,13 @@ jobs:
           fi
 
           certificate_path="$RUNNER_TEMP/ruf-release.p12"
+          certificate_pem="$RUNNER_TEMP/ruf-release.pem"
           keychain_path="$RUNNER_TEMP/ruf-release.keychain-db"
           keychain_password="$(/usr/bin/uuidgen)-$(/usr/bin/uuidgen)"
+          release_identity_sha1="979E44A42CA7D82F7C73198B826E5D469C4021A9"
           echo "RUF_RELEASE_KEYCHAIN=$keychain_path" >> "$GITHUB_ENV"
+          echo "RUF_RELEASE_CERTIFICATE_SHA1=$release_identity_sha1" \
+            >> "$GITHUB_ENV"
 
           /usr/bin/printf '%s' "$CERTIFICATE_P12_BASE64" \
             | /usr/bin/base64 --decode > "$certificate_path"
@@ -241,6 +245,15 @@ jobs:
             -k "$keychain_path" \
             -P "$CERTIFICATE_PASSWORD" \
             -T /usr/bin/codesign
+          /usr/bin/security find-certificate \
+            -c 'Ruf Release Code Signing' \
+            -p "$keychain_path" > "$certificate_pem"
+          /usr/bin/sudo /usr/bin/security add-trusted-cert \
+            -d \
+            -r trustRoot \
+            -p codeSign \
+            -k /Library/Keychains/System.keychain \
+            "$certificate_pem"
           /usr/bin/security set-key-partition-list \
             -S apple-tool:,apple:,codesign: \
             -s \
@@ -257,8 +270,8 @@ jobs:
             -p codesigning \
             "$keychain_path" \
             | /usr/bin/grep -F \
-              '979E44A42CA7D82F7C73198B826E5D469C4021A9 "Ruf Release Code Signing"'
-          /bin/rm -f "$certificate_path"
+              "$release_identity_sha1 \"Ruf Release Code Signing\""
+          /bin/rm -f "$certificate_path" "$certificate_pem"
 
       - name: Build the self-signed release
         env:
@@ -435,8 +448,15 @@ jobs:
       - name: Remove the temporary release keychain
         if: always()
         run: |
+          if [[ -n "${RUF_RELEASE_CERTIFICATE_SHA1:-}" ]]; then
+            /usr/bin/sudo /usr/bin/security delete-certificate \
+              -Z "$RUF_RELEASE_CERTIFICATE_SHA1" \
+              -t \
+              /Library/Keychains/System.keychain || true
+          fi
           if [[ -n "${RUF_RELEASE_KEYCHAIN:-}" ]]; then
             /usr/bin/security delete-keychain "$RUF_RELEASE_KEYCHAIN" || true
           fi
           /bin/rm -f \
-            "$RUNNER_TEMP/ruf-release.p12"
+            "$RUNNER_TEMP/ruf-release.p12" \
+            "$RUNNER_TEMP/ruf-release.pem"
