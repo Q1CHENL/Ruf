@@ -77,6 +77,18 @@ struct SettingsView: View {
                         .labelsHidden()
                     }
                 }
+
+                Picker(
+                    "Movement style",
+                    selection: $preferences.windowMovementStyle
+                ) {
+                    Text("Continuous")
+                        .tag(WindowMovementStyle.live)
+                    Text("Ghost")
+                        .tag(WindowMovementStyle.outline)
+                }
+                .pickerStyle(.radioGroup)
+                .disabled(!preferences.isWindowMovementEnabled)
             } header: {
                 Text("Keyboard Shortcuts")
             } footer: {

@@ -28,7 +28,9 @@ final class FocusedWindowMover: NSObject {
         let startFrame: CGRect
         let mutationPlan: WindowMovementMutationPlan
         let destinationDisplayFrame: CGRect
+        let style: WindowMovementStyle
         let startTimestamp: CFTimeInterval
+        var currentFrame: CGRect
 
         var destinationFrame: CGRect {
             mutationPlan.destinationFrame
@@ -72,6 +74,7 @@ final class FocusedWindowMover: NSObject {
     private static let fullScreenAttribute = "AXFullScreen"
 
     private let planner = WindowMovementPlanner()
+    private let outlineController = WindowMovementOutlineController()
     private let windowWriter = DispatchQueue(
         label: "com.qichen.ruf.window-writer",
         qos: .userInteractive
@@ -84,7 +87,10 @@ final class FocusedWindowMover: NSObject {
         UInt64
     >()
 
-    func move(_ direction: WindowMoveDirection) {
+    func move(
+        _ direction: WindowMoveDirection,
+        style: WindowMovementStyle
+    ) {
         guard AccessibilityPermission.isGranted else {
             return
         }
@@ -154,12 +160,22 @@ final class FocusedWindowMover: NSObject {
             return
         }
 
+        let startFrame: CGRect
+        if let previous = retargeting?.animation,
+           previous.style == .outline,
+           style == .outline {
+            startFrame = previous.currentFrame
+        } else {
+            startFrame = window.frame
+        }
+
         startAnimation(
             window: window.element,
             mutationTarget: window.mutationTarget,
-            from: window.frame,
+            from: startFrame,
             with: mutationPlan,
-            on: destinationScreen
+            on: destinationScreen,
+            style: style
         )
     }
 
@@ -172,11 +188,21 @@ final class FocusedWindowMover: NSObject {
         mutationTarget: WindowMutationTarget,
         from startFrame: CGRect,
         with mutationPlan: WindowMovementMutationPlan,
-        on destinationScreen: ScreenSnapshot
+        on destinationScreen: ScreenSnapshot,
+        style: WindowMovementStyle
     ) {
-        stopAnimation(.retargeted)
+        let preservesOutline = activeAnimation?.style == .outline
+            && style == .outline
+        stopAnimation(.retargeted, hidesOutline: !preservesOutline)
 
-        guard startFrame.origin != mutationPlan.destinationPosition else {
+        let needsAnimation = switch style {
+        case .live:
+            startFrame.origin != mutationPlan.destinationPosition
+        case .outline:
+            startFrame != mutationPlan.destinationFrame
+        }
+        guard needsAnimation else {
+            outlineController.hide()
             placeWindow(
                 target: mutationTarget,
                 with: mutationPlan,
@@ -193,8 +219,14 @@ final class FocusedWindowMover: NSObject {
             startFrame: startFrame,
             mutationPlan: mutationPlan,
             destinationDisplayFrame: destinationScreen.geometry.frame,
-            startTimestamp: CACurrentMediaTime()
+            style: style,
+            startTimestamp: CACurrentMediaTime(),
+            currentFrame: startFrame
         )
+
+        if style == .outline {
+            outlineController.show(accessibilityFrame: startFrame)
+        }
 
         let displayLink = destinationScreen.screen.displayLink(
             target: self,
@@ -225,8 +257,14 @@ final class FocusedWindowMover: NSObject {
         let frame = interpolatedFrame(
             from: animation.startFrame,
             to: animation.destinationFrame,
-            progress: easeInOutCubic(progress)
+            progress: easeInOutCubic(progress),
+            style: animation.style
         )
+        activeAnimation?.currentFrame = frame
+
+        if animation.style == .outline {
+            outlineController.update(accessibilityFrame: frame)
+        }
 
         if progress >= 1 {
             displayLink.invalidate()
@@ -238,7 +276,7 @@ final class FocusedWindowMover: NSObject {
                     animationIdentifier: animation.identifier
                 )
             )
-        } else {
+        } else if animation.style == .live {
             moveWindow(
                 target: animation.mutationTarget,
                 to: frame,
@@ -252,18 +290,34 @@ final class FocusedWindowMover: NSObject {
     private func interpolatedFrame(
         from start: CGRect,
         to destination: CGRect,
-        progress: CGFloat
+        progress: CGFloat,
+        style: WindowMovementStyle
     ) -> CGRect {
+        let size = switch style {
+        case .live:
+            start.size
+        case .outline:
+            CGSize(
+                width: start.width
+                    + (destination.width - start.width) * progress,
+                height: start.height
+                    + (destination.height - start.height) * progress
+            )
+        }
+
         return CGRect(
             origin: CGPoint(
                 x: start.minX + (destination.minX - start.minX) * progress,
                 y: start.minY + (destination.minY - start.minY) * progress
             ),
-            size: start.size
+            size: size
         )
     }
 
-    private func stopAnimation(_ reason: WindowMovementAnimationStopReason) {
+    private func stopAnimation(
+        _ reason: WindowMovementAnimationStopReason,
+        hidesOutline: Bool = true
+    ) {
         let animation = activeAnimation
         displayLink?.invalidate()
         displayLink = nil
@@ -273,6 +327,9 @@ final class FocusedWindowMover: NSObject {
             return
         }
 
+        if hidesOutline, animation.style == .outline {
+            outlineController.hide()
+        }
         windowWrites.removePendingRequests(
             coalescingKey: animation.identifier
         )

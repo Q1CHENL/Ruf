@@ -6,6 +6,11 @@ public enum AppSwitcherMode: String, Sendable {
     case ruf
 }
 
+public enum WindowMovementStyle: String, Sendable {
+    case live
+    case outline
+}
+
 @MainActor
 @Observable
 public final class AppPreferences {
@@ -14,6 +19,7 @@ public final class AppPreferences {
         static let showsMenuBarItem = "showsMenuBarItem"
         static let switcherMode = "switcherMode"
         static let windowMovementEnabled = "windowMovementEnabled"
+        static let windowMovementStyle = "windowMovementStyle"
     }
 
     private let defaults: UserDefaults
@@ -62,6 +68,19 @@ public final class AppPreferences {
         }
     }
 
+    public var windowMovementStyle: WindowMovementStyle {
+        didSet {
+            guard windowMovementStyle != oldValue else {
+                return
+            }
+
+            defaults.set(
+                windowMovementStyle.rawValue,
+                forKey: Key.windowMovementStyle
+            )
+        }
+    }
+
     public convenience init() {
         self.init(defaults: .standard)
     }
@@ -85,6 +104,9 @@ public final class AppPreferences {
         isWindowMovementEnabled = defaults.object(
             forKey: Key.windowMovementEnabled
         ) as? Bool ?? true
+        windowMovementStyle = defaults.string(
+            forKey: Key.windowMovementStyle
+        ).flatMap(WindowMovementStyle.init(rawValue:)) ?? .live
 
         if showsMenuBarItem != storedMenuBarVisibility {
             defaults.set(

@@ -46,6 +46,23 @@ final class AppPreferencesTests: XCTestCase {
     }
 
     @MainActor
+    func testWindowMovementStyleDefaultsToLiveAndPersistsOutline() {
+        let suiteName = "AppPreferencesTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let preferences = AppPreferences(defaults: defaults)
+
+        XCTAssertEqual(preferences.windowMovementStyle, .live)
+
+        preferences.windowMovementStyle = .outline
+
+        let reloadedPreferences = AppPreferences(defaults: defaults)
+
+        XCTAssertEqual(reloadedPreferences.windowMovementStyle, .outline)
+    }
+
+    @MainActor
     func testMenuBarItemDefaultsVisibleAndPersistsHiddenInRufMode() {
         let suiteName = "AppPreferencesTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

@@ -104,7 +104,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case let .switcher(action):
             handleSwitcher(action)
         case let .moveFocusedWindow(direction):
-            focusedWindowMover.move(direction)
+            focusedWindowMover.move(
+                direction,
+                style: preferences.windowMovementStyle
+            )
         }
     }
 
