@@ -101,10 +101,10 @@ final class WindowMovementPlannerTests: XCTestCase {
         )
     }
 
-    func testPinsAnOversizedWindowToTheVisibleFrameWithoutResizingIt() throws {
+    func testShrinksOnlyOversizedDimensionsToFitTheVisibleFrame() throws {
         let source = display(x: 0, y: 0, width: 1_000, height: 800)
         let destination = display(x: 1_000, y: 0, width: 500, height: 400)
-        let window = CGRect(x: 200, y: 100, width: 700, height: 500)
+        let window = CGRect(x: 100, y: 300, width: 700, height: 200)
 
         let plan = try XCTUnwrap(
             planner.plan(
@@ -116,7 +116,47 @@ final class WindowMovementPlannerTests: XCTestCase {
 
         XCTAssertEqual(
             plan.destinationFrame,
-            CGRect(x: 1_000, y: 0, width: 700, height: 500)
+            CGRect(x: 1_000, y: 100, width: 500, height: 200)
+        )
+    }
+
+    func testPreservesFullSpanLayoutAcrossDifferentVisibleFrames() throws {
+        let source = DisplayGeometry(
+            frame: CGRect(x: 0, y: 0, width: 1_000, height: 800),
+            visibleFrame: CGRect(x: 50, y: 30, width: 950, height: 770)
+        )
+        let destination = DisplayGeometry(
+            frame: CGRect(x: 1_000, y: 0, width: 500, height: 400),
+            visibleFrame: CGRect(x: 1_000, y: 20, width: 500, height: 380)
+        )
+
+        let plan = try XCTUnwrap(
+            planner.plan(
+                windowFrame: source.visibleFrame,
+                displays: [source, destination],
+                direction: .right
+            )
+        )
+
+        XCTAssertEqual(plan.destinationFrame, destination.visibleFrame)
+    }
+
+    func testRestoresFullWidthLayoutOnALargerDisplay() throws {
+        let source = display(x: 0, y: 0, width: 500, height: 400)
+        let destination = display(x: 500, y: 0, width: 1_000, height: 800)
+        let window = CGRect(x: 0, y: 100, width: 500, height: 200)
+
+        let plan = try XCTUnwrap(
+            planner.plan(
+                windowFrame: window,
+                displays: [source, destination],
+                direction: .right
+            )
+        )
+
+        XCTAssertEqual(
+            plan.destinationFrame,
+            CGRect(x: 500, y: 300, width: 1_000, height: 200)
         )
     }
 
@@ -151,7 +191,63 @@ final class WindowMovementPlannerTests: XCTestCase {
         XCTAssertEqual(plan.destinationDisplay, right)
         XCTAssertEqual(
             plan.destinationFrame,
-            CGRect(x: 2_000, y: 100, width: 1_400, height: 500)
+            CGRect(x: 2_000, y: 100, width: 1_000, height: 500)
+        )
+    }
+
+    func testExposesResizeWhenTheDestinationSizeChanges() {
+        let start = CGRect(x: 0, y: 100, width: 1_000, height: 800)
+        let destination = CGRect(x: 1_000, y: 300, width: 500, height: 400)
+        let mutations = WindowMovementMutationPlan(
+            from: start,
+            to: destination
+        )
+
+        XCTAssertEqual(mutations.destinationPosition, destination.origin)
+        XCTAssertTrue(mutations.requiresResize)
+        XCTAssertEqual(
+            mutations.finalPlacementMutations,
+            [
+                .position(destination.origin),
+                .size(destination.size),
+                .position(destination.origin),
+            ]
+        )
+    }
+
+    func testOmitsResizeWhenTheWindowAlreadyFits() {
+        let mutations = WindowMovementMutationPlan(
+            from: CGRect(x: 0, y: 100, width: 500, height: 400),
+            to: CGRect(x: 1_000, y: 300, width: 500, height: 400)
+        )
+
+        XCTAssertFalse(mutations.requiresResize)
+        XCTAssertEqual(
+            mutations.finalPlacementMutations,
+            [.position(CGPoint(x: 1_000, y: 300))]
+        )
+    }
+
+    func testMutationPolicyAcceptsIndeterminateAXWritesWithoutRetrying() {
+        XCTAssertTrue(WindowMutationPolicy.accepts(.succeeded))
+        XCTAssertTrue(WindowMutationPolicy.accepts(.indeterminate))
+        XCTAssertFalse(WindowMutationPolicy.accepts(.failed))
+    }
+
+    func testRoutesCurrentApplicationMutationsThroughAppKit() {
+        XCTAssertEqual(
+            WindowMutationBackend.forProcess(
+                target: 42,
+                current: 42
+            ),
+            .appKit
+        )
+        XCTAssertEqual(
+            WindowMutationBackend.forProcess(
+                target: 7,
+                current: 42
+            ),
+            .accessibility
         )
     }
 
@@ -179,6 +275,10 @@ final class WindowMovementPlannerTests: XCTestCase {
         )
         XCTAssertFalse(
             WindowMovementAnimationStopReason.completed
+                .settlesAtDestination
+        )
+        XCTAssertFalse(
+            WindowMovementAnimationStopReason.finalPlacementFailed
                 .settlesAtDestination
         )
     }

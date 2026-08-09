@@ -11,8 +11,9 @@ keyboard-first window controls.
   restores minimized windows and reopens apps with no open windows.
 - Open a new window through the selected app's menu, or quit it without
   activating it first.
-- Move a focused, non-full-screen window to an adjacent display without
-  changing its size or relative position.
+- Move a focused, non-full-screen window smoothly to an adjacent display.
+  Ruf keeps its size when it fits. Full-width and full-height layouts adapt to
+  the destination.
 - See Dock badges directly on app icons in the switcher.
 - Choose Ruf or macOS for Command-Tab, and control menu bar visibility and
   launch at login.

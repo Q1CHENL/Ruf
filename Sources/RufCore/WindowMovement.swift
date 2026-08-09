@@ -13,13 +13,15 @@ public enum WindowMovementAnimationStopReason: Equatable, Sendable {
     case displayConfigurationChanged
     case focusedWindowChanged
     case positionWriteFailed
+    case finalPlacementFailed
     case shutdown
 
     public var settlesAtDestination: Bool {
         switch self {
         case .focusedWindowChanged, .positionWriteFailed, .shutdown:
             true
-        case .completed, .retargeted, .displayConfigurationChanged:
+        case .completed, .retargeted, .displayConfigurationChanged,
+             .finalPlacementFailed:
             false
         }
     }
@@ -35,6 +37,35 @@ public enum WindowMovementAnimationStopReason: Equatable, Sendable {
             return .focusedWindowChanged
         }
         return nil
+    }
+}
+
+public enum WindowMutationOutcome: Equatable, Sendable {
+    case succeeded
+    case indeterminate
+    case failed
+}
+
+public enum WindowMutationBackend: Equatable, Sendable {
+    case appKit
+    case accessibility
+
+    public static func forProcess(
+        target: Int32,
+        current: Int32
+    ) -> Self {
+        target == current ? .appKit : .accessibility
+    }
+}
+
+public enum WindowMutationPolicy {
+    public static func accepts(_ outcome: WindowMutationOutcome) -> Bool {
+        switch outcome {
+        case .succeeded, .indeterminate:
+            true
+        case .failed:
+            false
+        }
     }
 }
 
@@ -61,7 +92,44 @@ public struct WindowMovementPlan: Sendable {
     }
 }
 
+public enum WindowFrameMutation: Equatable, Sendable {
+    case position(CGPoint)
+    case size(CGSize)
+}
+
+public struct WindowMovementMutationPlan: Sendable {
+    public let destinationFrame: CGRect
+    private let sourceSize: CGSize
+
+    public init(from startFrame: CGRect, to destinationFrame: CGRect) {
+        sourceSize = startFrame.size
+        self.destinationFrame = destinationFrame
+    }
+
+    public var destinationPosition: CGPoint {
+        destinationFrame.origin
+    }
+
+    public var requiresResize: Bool {
+        sourceSize != destinationFrame.size
+    }
+
+    public var finalPlacementMutations: [WindowFrameMutation] {
+        guard requiresResize else {
+            return [.position(destinationPosition)]
+        }
+
+        return [
+            .position(destinationPosition),
+            .size(destinationFrame.size),
+            .position(destinationPosition),
+        ]
+    }
+}
+
 public struct WindowMovementPlanner: Sendable {
+    private static let fullSpanTolerance: CGFloat = 2
+
     public init() {}
 
     public func plan(
@@ -108,17 +176,31 @@ public struct WindowMovementPlanner: Sendable {
         let destinationHorizontalRange = destinationVisibleFrame.minX...destinationVisibleFrame.maxX
         let sourceVerticalRange = sourceVisibleFrame.minY...sourceVisibleFrame.maxY
         let destinationVerticalRange = destinationVisibleFrame.minY...destinationVisibleFrame.maxY
+        let destinationSize = CGSize(
+            width: mappedLength(
+                windowRange: windowFrame.minX...windowFrame.maxX,
+                sourceRange: sourceHorizontalRange,
+                destinationRange: destinationHorizontalRange
+            ),
+            height: mappedLength(
+                windowRange: windowFrame.minY...windowFrame.maxY,
+                sourceRange: sourceVerticalRange,
+                destinationRange: destinationVerticalRange
+            )
+        )
 
         let destinationOrigin = CGPoint(
             x: mappedOrigin(
                 windowOrigin: windowFrame.minX,
-                windowLength: windowFrame.width,
+                sourceWindowLength: windowFrame.width,
+                destinationWindowLength: destinationSize.width,
                 sourceRange: sourceHorizontalRange,
                 destinationRange: destinationHorizontalRange
             ),
             y: mappedOrigin(
                 windowOrigin: windowFrame.minY,
-                windowLength: windowFrame.height,
+                sourceWindowLength: windowFrame.height,
+                destinationWindowLength: destinationSize.height,
                 sourceRange: sourceVerticalRange,
                 destinationRange: destinationVerticalRange
             )
@@ -128,7 +210,7 @@ public struct WindowMovementPlanner: Sendable {
             destinationDisplay: destinationDisplay,
             destinationFrame: CGRect(
                 origin: destinationOrigin,
-                size: windowFrame.size
+                size: destinationSize
             )
         )
     }
@@ -261,16 +343,17 @@ public struct WindowMovementPlanner: Sendable {
 
     private func mappedOrigin(
         windowOrigin: CGFloat,
-        windowLength: CGFloat,
+        sourceWindowLength: CGFloat,
+        destinationWindowLength: CGFloat,
         sourceRange: ClosedRange<CGFloat>,
         destinationRange: ClosedRange<CGFloat>
     ) -> CGFloat {
         let sourceTravel = max(0, sourceRange.upperBound
             - sourceRange.lowerBound
-            - windowLength)
+            - sourceWindowLength)
         let destinationTravel = max(0, destinationRange.upperBound
             - destinationRange.lowerBound
-            - windowLength)
+            - destinationWindowLength)
         guard sourceTravel > 0, destinationTravel > 0 else {
             return destinationRange.lowerBound
         }
@@ -280,6 +363,35 @@ public struct WindowMovementPlanner: Sendable {
             max(0, (windowOrigin - sourceRange.lowerBound) / sourceTravel)
         )
         return destinationRange.lowerBound + progress * destinationTravel
+    }
+
+    private func mappedLength(
+        windowRange: ClosedRange<CGFloat>,
+        sourceRange: ClosedRange<CGFloat>,
+        destinationRange: ClosedRange<CGFloat>
+    ) -> CGFloat {
+        let destinationLength = destinationRange.upperBound
+            - destinationRange.lowerBound
+        guard !fills(windowRange, sourceRange) else {
+            return destinationLength
+        }
+
+        let windowLength = windowRange.upperBound - windowRange.lowerBound
+        return min(windowLength, destinationLength)
+    }
+
+    private func fills(
+        _ windowRange: ClosedRange<CGFloat>,
+        _ displayRange: ClosedRange<CGFloat>
+    ) -> Bool {
+        let lowerEdgeMatches = abs(
+            windowRange.lowerBound - displayRange.lowerBound
+        ) <= Self.fullSpanTolerance
+        let upperEdgeMatches = abs(
+            windowRange.upperBound - displayRange.upperBound
+        ) <= Self.fullSpanTolerance
+
+        return lowerEdgeMatches && upperEdgeMatches
     }
 
     private func intervalGap(
