@@ -61,8 +61,18 @@ public enum SwitcherAction: Equatable, Sendable {
     case cancel
 }
 
+public struct SwitcherCommand: Equatable, Sendable {
+    public let gestureID: UInt64
+    public let action: SwitcherAction
+
+    public init(gestureID: UInt64, action: SwitcherAction) {
+        self.gestureID = gestureID
+        self.action = action
+    }
+}
+
 public enum KeyboardCommand: Equatable, Sendable {
-    case switcher(SwitcherAction)
+    case switcher(SwitcherCommand)
     case moveFocusedWindow(WindowMoveDirection)
 }
 
@@ -84,12 +94,17 @@ public struct KeyboardInputSession: Sendable {
         var isTriggerKeyDown: Bool
     }
 
-    public private(set) var isCycling = false
+    private var activeSwitcherGestureID: UInt64?
     private var pendingSwitcherGesture: PendingSwitcherGesture?
-    private var lastSwitcherGestureToken: UInt64 = 0
+    private var lastPendingSwitcherGestureToken: UInt64 = 0
+    private var lastSwitcherGestureID: UInt64 = 0
 
-    /// Identifies the pending gesture so a caller timing it out can tell one
-    /// gesture being replaced by another from the same gesture still waiting.
+    public var isCycling: Bool {
+        activeSwitcherGestureID != nil
+    }
+
+    /// Identifies a pending terminal gesture so its deadline cannot expire a
+    /// replacement gesture that started while the deadline task was waiting.
     public var pendingSwitcherGestureToken: UInt64? {
         pendingSwitcherGesture?.token
     }
@@ -117,9 +132,9 @@ public struct KeyboardInputSession: Sendable {
         }
 
         if let action = switcherGestureAction(for: input) {
-            lastSwitcherGestureToken += 1
+            lastPendingSwitcherGestureToken += 1
             pendingSwitcherGesture = PendingSwitcherGesture(
-                token: lastSwitcherGestureToken,
+                token: lastPendingSwitcherGestureToken,
                 triggerKeyCode: input.keyCode,
                 action: action,
                 isTriggerKeyDown: true
@@ -138,39 +153,49 @@ public struct KeyboardInputSession: Sendable {
     }
 
     private mutating func updateSession(for decision: KeyboardDecision) {
-        switch decision.command {
-        case .switcher(.cycle):
-            isCycling = true
-        case .switcher(.openNewWindow),
-             .switcher(.quitApplication),
-             .switcher(.commit),
-             .switcher(.cancel):
+        guard case let .switcher(command) = decision.command else {
+            return
+        }
+
+        switch command.action {
+        case .openNewWindow, .quitApplication, .commit, .cancel:
             reset()
-        case .switcher(.move), .moveFocusedWindow, nil:
+        case .cycle, .move:
             break
         }
     }
 
     public mutating func interrupt() -> KeyboardCommand? {
-        guard isCycling else {
+        guard let command = switcherCommand(.cancel) else {
             return nil
         }
 
         reset()
-        return .switcher(.cancel)
+        return command
     }
 
-    public mutating func cancelPendingSwitcherGesture() -> KeyboardCommand? {
-        guard pendingSwitcherGesture != nil else {
+    public mutating func cancelPendingSwitcherGesture(
+        expectedToken: UInt64
+    ) -> KeyboardCommand? {
+        guard pendingSwitcherGesture?.token == expectedToken,
+              let command = switcherCommand(.cancel) else {
             return nil
         }
 
         reset()
-        return .switcher(.cancel)
+        return command
+    }
+
+    public mutating func resetSwitcherGesture(ifMatching gestureID: UInt64) {
+        guard activeSwitcherGestureID == gestureID else {
+            return
+        }
+
+        reset()
     }
 
     public mutating func reset() {
-        isCycling = false
+        activeSwitcherGestureID = nil
         pendingSwitcherGesture = nil
     }
 
@@ -222,13 +247,13 @@ public struct KeyboardInputSession: Sendable {
 
         return KeyboardDecision(
             command: isComplete
-                ? .switcher(gesture.action)
+                ? switcherCommand(gesture.action)
                 : nil,
             isConsumed: input.kind != .flagsChanged
         )
     }
 
-    private func decision(
+    private mutating func decision(
         for input: KeyboardInput,
         capturesCommandTab: Bool,
         capturesWindowMovement: Bool
@@ -236,7 +261,7 @@ public struct KeyboardInputSession: Sendable {
         if input.kind == .flagsChanged {
             let command: KeyboardCommand? = isCycling
                 && !input.modifiers.contains(.command)
-                ? .switcher(.commit)
+                ? switcherCommand(.commit)
                 : nil
             return KeyboardDecision(command: command, isConsumed: false)
         }
@@ -269,8 +294,8 @@ public struct KeyboardInputSession: Sendable {
 
         if isCommandTab {
             return KeyboardDecision(
-                command: .switcher(
-                    .cycle(backwards: input.modifiers.contains(.shift))
+                command: cycleCommand(
+                    backwards: input.modifiers.contains(.shift)
                 ),
                 isConsumed: true
             )
@@ -285,16 +310,25 @@ public struct KeyboardInputSession: Sendable {
         }
 
         if input.keyCode == KeyboardKeyCode.escape {
-            return KeyboardDecision(command: .switcher(.cancel), isConsumed: true)
+            return KeyboardDecision(
+                command: switcherCommand(.cancel),
+                isConsumed: true
+            )
         }
 
         if input.keyCode == KeyboardKeyCode.returnKey
             || input.keyCode == KeyboardKeyCode.keypadEnter {
-            return KeyboardDecision(command: .switcher(.commit), isConsumed: true)
+            return KeyboardDecision(
+                command: switcherCommand(.commit),
+                isConsumed: true
+            )
         }
 
         guard input.modifiers.contains(.command) else {
-            return KeyboardDecision(command: .switcher(.commit), isConsumed: true)
+            return KeyboardDecision(
+                command: switcherCommand(.commit),
+                isConsumed: true
+            )
         }
 
         let action: SwitcherAction? = switch input.keyCode {
@@ -311,9 +345,35 @@ public struct KeyboardInputSession: Sendable {
         }
 
         return KeyboardDecision(
-            command: action.map(KeyboardCommand.switcher),
+            command: action.flatMap(switcherCommand),
             isConsumed: true
         )
+    }
+
+    private mutating func cycleCommand(backwards: Bool) -> KeyboardCommand {
+        let gestureID: UInt64
+        if let activeSwitcherGestureID {
+            gestureID = activeSwitcherGestureID
+        } else {
+            lastSwitcherGestureID += 1
+            activeSwitcherGestureID = lastSwitcherGestureID
+            gestureID = lastSwitcherGestureID
+        }
+
+        return .switcher(
+            SwitcherCommand(
+                gestureID: gestureID,
+                action: .cycle(backwards: backwards)
+            )
+        )
+    }
+
+    private func switcherCommand(
+        _ action: SwitcherAction
+    ) -> KeyboardCommand? {
+        activeSwitcherGestureID.map {
+            .switcher(SwitcherCommand(gestureID: $0, action: action))
+        }
     }
 
     private func windowMoveDirection(

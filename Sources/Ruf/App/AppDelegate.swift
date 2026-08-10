@@ -101,8 +101,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func handle(_ command: KeyboardCommand) {
         switch command {
-        case let .switcher(action):
-            handleSwitcher(action)
+        case let .switcher(command):
+            handleSwitcher(command)
         case let .moveFocusedWindow(direction):
             focusedWindowMover.move(
                 direction,
@@ -111,23 +111,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    private func handleSwitcher(_ command: SwitcherAction) {
+    private func handleSwitcher(_ command: SwitcherCommand) {
         switch loadingSession.receive(command) {
         case .queued:
             return
         case .cancelLoading:
-            cancelSwitcher()
+            cancelSwitcher(forSwitcherGesture: command.gestureID)
+            resumeNextSwitcherGesture()
             return
         case .handleImmediately:
             break
         }
 
-        switch command {
+        switch command.action {
         case let .cycle(backwards):
             if model.isPresented {
                 model.move(backwards ? .backward : .forward)
             } else {
-                loadTargets(backwards: backwards)
+                loadTargets(
+                    backwards: backwards,
+                    gestureID: command.gestureID
+                )
             }
         case let .move(move):
             model.move(move)
@@ -136,14 +140,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .quitApplication:
             quitSelectedApplication()
         case .commit:
-            commitSelection()
+            commitSelection(forSwitcherGesture: command.gestureID)
         case .cancel:
-            cancelSwitcher()
+            cancelSwitcher(forSwitcherGesture: command.gestureID)
         }
     }
 
-    private func loadTargets(backwards: Bool) {
-        loadingSession.beginLoading()
+    private func loadTargets(backwards: Bool, gestureID: UInt64) {
+        loadingSession.beginLoading(for: gestureID)
         // Spans the whole gesture the user actually feels: the keyboard command
         // that opens the switcher through to the panel reaching the screen.
         openSpan = PerformanceLog.begin("switcher.open")
@@ -161,20 +165,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 return
             }
 
-            finishLoadingTargets(targets, backwards: backwards)
+            finishLoadingTargets(
+                targets,
+                backwards: backwards,
+                gestureID: gestureID
+            )
         }
     }
 
     private func finishLoadingTargets(
         _ targets: [SwitchTarget],
-        backwards: Bool
+        backwards: Bool,
+        gestureID: UInt64
     ) {
+        guard let replayPlan = loadingSession.finishLoading(
+            for: gestureID
+        ) else {
+            return
+        }
+
         snapshotTask = nil
-        let replayPlan = loadingSession.finishLoading()
 
         guard !targets.isEmpty else {
             endOpenSpan("aborted targets=0")
-            keyboardEventTap.resetInputSession()
+            keyboardEventTap.resetInputSession(
+                forSwitcherGesture: gestureID
+            )
+            resumeNextSwitcherGesture()
             return
         }
 
@@ -183,9 +200,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         PerformanceLog.end(beginSpan)
 
         for action in replayPlan.beforePresentation {
-            handleSwitcher(action)
+            handleSwitcher(
+                SwitcherCommand(gestureID: gestureID, action: action)
+            )
             guard model.isPresented else {
                 endOpenSpan("dismissed before presentation")
+                resumeNextSwitcherGesture()
                 return
             }
         }
@@ -194,18 +214,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         endOpenSpan("targets=\(targets.count)")
 
         for action in replayPlan.afterPresentation {
-            handleSwitcher(action)
+            handleSwitcher(
+                SwitcherCommand(gestureID: gestureID, action: action)
+            )
             if case .openNewWindow = action {
+                resumeNextSwitcherGesture()
                 return
             }
             guard model.isPresented else {
+                resumeNextSwitcherGesture()
                 return
             }
         }
     }
 
-    private func commitSelection() {
-        keyboardEventTap.resetInputSession()
+    private func commitSelection(forSwitcherGesture gestureID: UInt64? = nil) {
+        if let gestureID {
+            keyboardEventTap.resetInputSession(
+                forSwitcherGesture: gestureID
+            )
+        } else {
+            keyboardEventTap.resetInputSession()
+        }
         guard let target = takeSelection() else {
             return
         }
@@ -319,6 +349,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         keyboardEventTap.resetInputSession()
         model.cancel()
         panelController.cancel()
+    }
+
+    private func cancelSwitcher(forSwitcherGesture gestureID: UInt64) {
+        snapshotTask?.cancel()
+        snapshotTask = nil
+        endOpenSpan("cancelled")
+        keyboardEventTap.resetInputSession(
+            forSwitcherGesture: gestureID
+        )
+        model.cancel()
+        panelController.cancel()
+    }
+
+    private func resumeNextSwitcherGesture() {
+        guard !loadingSession.isLoading,
+              !model.isPresented,
+              let gesture = loadingSession.takeNextGesture() else {
+            return
+        }
+
+        for action in gesture.actions {
+            handleSwitcher(
+                SwitcherCommand(
+                    gestureID: gesture.gestureID,
+                    action: action
+                )
+            )
+        }
     }
 
     private func installStatusItem() {

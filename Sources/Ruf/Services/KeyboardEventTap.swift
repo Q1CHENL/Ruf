@@ -161,6 +161,12 @@ final class KeyboardEventTap {
         inputSession.reset()
     }
 
+    func resetInputSession(forSwitcherGesture gestureID: UInt64) {
+        let previousGestureToken = inputSession.pendingSwitcherGestureToken
+        inputSession.resetSwitcherGesture(ifMatching: gestureID)
+        synchronizePendingGestureTimeout(previousToken: previousGestureToken)
+    }
+
     func setCaptureState(
         capturesCommandTab: Bool,
         capturesWindowMovement: Bool
@@ -267,12 +273,15 @@ final class KeyboardEventTap {
                 return
             }
 
-            guard let self else {
+            guard let self,
+                  inputSession.pendingSwitcherGestureToken == token else {
                 return
             }
 
             pendingGestureTimeoutTask = nil
-            if let command = inputSession.cancelPendingSwitcherGesture() {
+            if let command = inputSession.cancelPendingSwitcherGesture(
+                expectedToken: token
+            ) {
                 enqueue(command)
             }
         }

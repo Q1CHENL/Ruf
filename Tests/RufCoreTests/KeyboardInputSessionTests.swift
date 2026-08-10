@@ -351,10 +351,10 @@ final class KeyboardInputSessionTests: XCTestCase {
         var session = cyclingSession()
         _ = session.interpret(commandNInput(), capturesCommandTab: true)
 
-        XCTAssertEqual(session.interrupt(), .switcher(.cancel))
+        XCTAssertEqual(session.interrupt(), switcherCommand(.cancel))
         XCTAssertEqual(
             session.interpret(commandTabInput(), capturesCommandTab: true),
-            switcherDecision(.cycle(backwards: false))
+            switcherDecision(.cycle(backwards: false), gestureID: 2)
         )
     }
 
@@ -591,18 +591,106 @@ final class KeyboardInputSessionTests: XCTestCase {
         XCTAssertNil(session.pendingSwitcherGestureToken)
     }
 
-    func testPendingSwitcherGestureCanBeCancelledByItsDeadline() {
+    func testPendingSwitcherGestureCanBeCancelledByItsDeadline() throws {
         var session = cyclingSession()
         _ = session.interpret(commandNInput(), capturesCommandTab: true)
 
-        XCTAssertNotNil(session.pendingSwitcherGestureToken)
+        let token = try XCTUnwrap(session.pendingSwitcherGestureToken)
         XCTAssertEqual(
-            session.cancelPendingSwitcherGesture(),
-            .switcher(.cancel)
+            session.cancelPendingSwitcherGesture(expectedToken: token),
+            switcherCommand(.cancel)
         )
         XCTAssertFalse(session.isCycling)
         XCTAssertNil(session.pendingSwitcherGestureToken)
-        XCTAssertNil(session.cancelPendingSwitcherGesture())
+        XCTAssertNil(
+            session.cancelPendingSwitcherGesture(expectedToken: token)
+        )
+    }
+
+    func testStaleDeadlineCannotCancelAReplacementGesture() throws {
+        var session = cyclingSession()
+        _ = session.interpret(commandNInput(), capturesCommandTab: true)
+        let staleToken = try XCTUnwrap(session.pendingSwitcherGestureToken)
+
+        _ = session.interpret(commandQInput(), capturesCommandTab: true)
+        let replacementToken = try XCTUnwrap(
+            session.pendingSwitcherGestureToken
+        )
+
+        XCTAssertNotEqual(staleToken, replacementToken)
+        XCTAssertNil(
+            session.cancelPendingSwitcherGesture(expectedToken: staleToken)
+        )
+        XCTAssertEqual(
+            session.pendingSwitcherGestureToken,
+            replacementToken
+        )
+        XCTAssertTrue(session.isCycling)
+        XCTAssertEqual(
+            session.cancelPendingSwitcherGesture(
+                expectedToken: replacementToken
+            ),
+            switcherCommand(.cancel)
+        )
+    }
+
+    func testTerminalActionStartsANewGestureGeneration() throws {
+        var session = KeyboardInputSession()
+        let firstCycle = session.interpret(
+            commandTabInput(),
+            capturesCommandTab: true
+        )
+        let firstGestureID = try XCTUnwrap(
+            firstCycle.command?.switcherCommand?.gestureID
+        )
+
+        _ = session.interpret(
+            commandReleaseInput(),
+            capturesCommandTab: true
+        )
+        let secondCycle = session.interpret(
+            commandTabInput(),
+            capturesCommandTab: true
+        )
+        let secondGestureID = try XCTUnwrap(
+            secondCycle.command?.switcherCommand?.gestureID
+        )
+
+        XCTAssertNotEqual(firstGestureID, secondGestureID)
+    }
+
+    func testStaleGestureResetCannotClearANewerGesture() throws {
+        var session = KeyboardInputSession()
+        let firstCycle = session.interpret(
+            commandTabInput(),
+            capturesCommandTab: true
+        )
+        let firstGestureID = try XCTUnwrap(
+            firstCycle.command?.switcherCommand?.gestureID
+        )
+
+        _ = session.interpret(
+            commandReleaseInput(),
+            capturesCommandTab: true
+        )
+        let secondCycle = session.interpret(
+            commandTabInput(),
+            capturesCommandTab: true
+        )
+        let secondGestureID = try XCTUnwrap(
+            secondCycle.command?.switcherCommand?.gestureID
+        )
+
+        session.resetSwitcherGesture(ifMatching: firstGestureID)
+
+        XCTAssertTrue(session.isCycling)
+        XCTAssertEqual(
+            session.interpret(
+                commandTabInput(),
+                capturesCommandTab: true
+            ).command?.switcherCommand?.gestureID,
+            secondGestureID
+        )
     }
 
     func testPendingSwitcherGestureYieldsToSwitcherNavigation() {
@@ -705,7 +793,7 @@ final class KeyboardInputSessionTests: XCTestCase {
     func testSessionCancelsWhenTheEventTapIsInterrupted() {
         var session = cyclingSession()
 
-        XCTAssertEqual(session.interrupt(), .switcher(.cancel))
+        XCTAssertEqual(session.interrupt(), switcherCommand(.cancel))
         XCTAssertFalse(session.isCycling)
         XCTAssertNil(session.interrupt())
     }
@@ -759,11 +847,31 @@ final class KeyboardInputSessionTests: XCTestCase {
 
     private func switcherDecision(
         _ action: SwitcherAction,
-        isConsumed: Bool = true
+        isConsumed: Bool = true,
+        gestureID: UInt64 = 1
     ) -> KeyboardDecision {
         KeyboardDecision(
-            command: .switcher(action),
+            command: switcherCommand(action, gestureID: gestureID),
             isConsumed: isConsumed
         )
+    }
+
+    private func switcherCommand(
+        _ action: SwitcherAction,
+        gestureID: UInt64 = 1
+    ) -> KeyboardCommand {
+        .switcher(
+            SwitcherCommand(gestureID: gestureID, action: action)
+        )
+    }
+}
+
+private extension KeyboardCommand {
+    var switcherCommand: SwitcherCommand? {
+        guard case let .switcher(command) = self else {
+            return nil
+        }
+
+        return command
     }
 }
