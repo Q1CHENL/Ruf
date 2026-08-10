@@ -99,8 +99,8 @@ enum PerformanceLog {
     }
 }
 
-private final class PerformanceLogFile: @unchecked Sendable {
-    private static let maximumByteCount = 4 * 1024 * 1024
+final class PerformanceLogFile: @unchecked Sendable {
+    private static let defaultMaximumByteCount = 4 * 1024 * 1024
 
     static let url: URL? = {
         guard let directory = try? FileManager.default.url(
@@ -123,9 +123,21 @@ private final class PerformanceLogFile: @unchecked Sendable {
     )
     private let handle: FileHandle
     private let formatter: DateFormatter
+    private let maximumByteCount: UInt64
 
-    init?() {
+    convenience init?() {
         guard let url = Self.url else {
+            return nil
+        }
+
+        self.init(
+            url: url,
+            maximumByteCount: Self.defaultMaximumByteCount
+        )
+    }
+
+    init?(url: URL, maximumByteCount: Int) {
+        guard maximumByteCount > 0 else {
             return nil
         }
 
@@ -147,28 +159,21 @@ private final class PerformanceLogFile: @unchecked Sendable {
             }
         }
 
-        // Records accumulate across sessions so runs can be compared, which
-        // needs a ceiling: a tight measurement loop reaches megabytes in
-        // seconds. Older runs are dropped rather than allowed to grow.
-        let size = (try? fileManager.attributesOfItem(
-            atPath: url.path(percentEncoded: false)
-        )[.size] as? Int) ?? 0
-        if size > Self.maximumByteCount {
-            try? Data().write(to: url)
-        }
-
         guard let handle = try? FileHandle(forWritingTo: url) else {
             return nil
         }
 
         self.handle = handle
+        self.maximumByteCount = UInt64(maximumByteCount)
         formatter = DateFormatter()
         formatter.dateFormat = "HH:mm:ss.SSS"
 
         // Each launch is its own measurement session; a marker keeps the runs
         // in an accumulated file distinguishable.
         let pid = ProcessInfo.processInfo.processIdentifier
-        write("\n--- session \(pid) started \(formatter.string(from: Date()))")
+        queue.sync { [self] in
+            write("\n--- session \(pid) started \(formatter.string(from: Date()))")
+        }
     }
 
     deinit {
@@ -190,12 +195,35 @@ private final class PerformanceLogFile: @unchecked Sendable {
         }
     }
 
+    func flush() {
+        queue.sync { [self] in
+            try? handle.synchronize()
+        }
+    }
+
     private func write(_ line: String) {
         guard let data = (line + "\n").data(using: .utf8) else {
             return
         }
+        let byteCount = UInt64(data.count)
+        guard byteCount <= maximumByteCount,
+              let endOffset = try? handle.seekToEnd() else {
+            return
+        }
 
-        _ = try? handle.seekToEnd()
-        try? handle.write(contentsOf: data)
+        // A tight measurement loop can fill the log during one launch. Keep
+        // the newest complete records by dropping the accumulated chunk before
+        // writing the record that would cross the cap. Every size decision and
+        // write happens on the same serial queue as append.
+        do {
+            if endOffset > maximumByteCount - byteCount {
+                try handle.truncate(atOffset: 0)
+                try handle.seek(toOffset: 0)
+            }
+
+            try handle.write(contentsOf: data)
+        } catch {
+            return
+        }
     }
 }

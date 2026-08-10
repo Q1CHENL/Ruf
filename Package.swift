@@ -29,5 +29,9 @@ let package = Package(
             name: "RufCoreTests",
             dependencies: ["RufCore"]
         ),
+        .testTarget(
+            name: "RufTests",
+            dependencies: ["Ruf"]
+        ),
     ]
 )
