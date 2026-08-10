@@ -391,7 +391,7 @@ jobs:
           {
             echo 'A lightweight macOS app and window switcher with a matrix layout and keyboard-first window controls.'
             echo
-            echo '## What is new'
+            echo "## What's new"
             echo
             /bin/cat "$RELEASE_NOTES_PATH"
             echo
