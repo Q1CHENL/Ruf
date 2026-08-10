@@ -6,6 +6,7 @@ on:
       - "v*"
 
 permissions:
+  actions: read
   contents: write
 
 concurrency:
@@ -19,7 +20,7 @@ jobs:
     environment: release
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           fetch-depth: 0
 
@@ -72,8 +73,42 @@ jobs:
           {
             echo "RELEASE_VERSION=$release_version"
             echo "RELEASE_BUILD=$bundle_build"
+            echo "RELEASE_COMMIT=$release_commit"
             echo "RELEASE_NOTES_PATH=$notes_path"
           } >> "$GITHUB_ENV"
+
+      - name: Require successful CI for release commit
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ci_runs="$RUNNER_TEMP/ci-runs.json"
+          /usr/bin/curl \
+            --fail-with-body \
+            --get \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Accept: application/vnd.github+json" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --data-urlencode "branch=$DEFAULT_BRANCH" \
+            --data-urlencode "head_sha=$RELEASE_COMMIT" \
+            --data-urlencode "event=push" \
+            --data-urlencode "status=success" \
+            --data-urlencode "per_page=100" \
+            --output "$ci_runs" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs"
+
+          if ! /usr/bin/jq -e \
+            --arg branch "$DEFAULT_BRANCH" \
+            --arg sha "$RELEASE_COMMIT" \
+            'any(.workflow_runs[]; .head_sha == $sha
+              and .head_branch == $branch
+              and .event == "push"
+              and .status == "completed"
+              and .conclusion == "success")' \
+            "$ci_runs" >/dev/null; then
+            echo "No successful CI push run exists on $DEFAULT_BRANCH for tagged commit $RELEASE_COMMIT" >&2
+            exit 1
+          fi
 
       - name: Download and validate the previous appcast
         env:
@@ -141,8 +176,8 @@ jobs:
 
       - name: Build and test with strict warnings
         run: |
-          swift build -Xswiftc -warnings-as-errors
-          swift test -Xswiftc -warnings-as-errors
+          swift build --only-use-versions-from-resolved-file -Xswiftc -warnings-as-errors
+          swift test --only-use-versions-from-resolved-file -Xswiftc -warnings-as-errors
 
       - name: Verify the Sparkle signing key
         env:
@@ -289,6 +324,7 @@ jobs:
           /usr/bin/codesign --verify --deep --strict --verbose=2 dist/Ruf.app
           /usr/bin/codesign --verify --verbose=2 dist/Ruf.dmg
           /usr/bin/hdiutil verify dist/Ruf.dmg
+          ./script/build_and_run.sh --validate-package
 
           architectures="$(/usr/bin/lipo -archs dist/Ruf.app/Contents/MacOS/Ruf)"
           [[ "$architectures" == *arm64* ]]

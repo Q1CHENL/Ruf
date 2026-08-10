@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           fetch-depth: 0
 
@@ -46,10 +46,10 @@ jobs:
           git diff --check "$diff_base" HEAD
 
       - name: Build with strict warnings
-        run: swift build -Xswiftc -warnings-as-errors
+        run: swift build --only-use-versions-from-resolved-file -Xswiftc -warnings-as-errors
 
       - name: Run tests with strict warnings
-        run: swift test -Xswiftc -warnings-as-errors
+        run: swift test --only-use-versions-from-resolved-file -Xswiftc -warnings-as-errors
 
       - name: Build local distribution-shaped artifacts
         env:
@@ -60,6 +60,7 @@ jobs:
         run: |
           codesign --verify --deep --strict --verbose=2 dist/Ruf.app
           hdiutil verify dist/Ruf.dmg
+          ./script/build_and_run.sh --validate-package
           architectures="$(lipo -archs dist/Ruf.app/Contents/MacOS/Ruf)"
           [[ "$architectures" == *arm64* ]]
           [[ "$architectures" == *x86_64* ]]

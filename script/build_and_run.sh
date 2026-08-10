@@ -9,6 +9,9 @@ BUNDLE_ID="com.qichen.ruf"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="$ROOT_DIR/dist"
 APP_ICON_SOURCE="$ROOT_DIR/Resources/AppIcon/$APP_NAME.icon"
+THIRD_PARTY_NOTICE_SOURCE="$ROOT_DIR/Resources/ThirdPartyNotices/Sparkle-LICENSE.txt"
+THIRD_PARTY_NOTICE_NAME="Sparkle-LICENSE.txt"
+SPARKLE_LICENSE_SOURCE="$ROOT_DIR/.build/checkouts/Sparkle/LICENSE"
 SPARKLE_TOOLS="$ROOT_DIR/.build/artifacts/sparkle/Sparkle/bin"
 SPARKLE_KEY_ACCOUNT="$BUNDLE_ID"
 REPOSITORY_URL="https://github.com/Q1CHENL/Ruf"
@@ -61,6 +64,10 @@ create_disk_image() {
             --norsrc \
             "$APP_BUNDLE" \
             "$image_source/$APP_NAME.app"
+        /usr/bin/ditto \
+            --norsrc \
+            "$THIRD_PARTY_NOTICE_SOURCE" \
+            "$image_source/$THIRD_PARTY_NOTICE_NAME"
         ln -s /Applications "$image_source/Applications"
 
         /usr/sbin/diskutil image create from \
@@ -72,6 +79,53 @@ create_disk_image() {
         /bin/mv -f "$candidate_disk_image" "$output_path"
     )
 }
+
+verify_packaged_notices() (
+    local attached=false
+    local mount_point
+    mount_point="$(mktemp -d)"
+
+    cleanup_notice_mount() {
+        if [[ "$attached" == true ]]; then
+            /usr/sbin/diskutil eject "$mount_point" >/dev/null 2>&1 || true
+        fi
+        rm -rf "$mount_point"
+    }
+    trap cleanup_notice_mount EXIT
+
+    if ! /usr/bin/cmp -s \
+        "$SPARKLE_LICENSE_SOURCE" \
+        "$THIRD_PARTY_NOTICE_SOURCE"; then
+        echo "The checked-in Sparkle license does not match the resolved dependency" >&2
+        return 1
+    fi
+    if ! /usr/bin/cmp -s \
+        "$THIRD_PARTY_NOTICE_SOURCE" \
+        "$APP_RESOURCES/$THIRD_PARTY_NOTICE_NAME"; then
+        echo "The app bundle is missing the exact Sparkle license" >&2
+        return 1
+    fi
+
+    /usr/sbin/diskutil image attach \
+        --readOnly \
+        --nobrowse \
+        --mountPoint "$mount_point" \
+        "$APP_DISK_IMAGE" >/dev/null
+    attached=true
+
+    if ! /usr/bin/cmp -s \
+        "$THIRD_PARTY_NOTICE_SOURCE" \
+        "$mount_point/$THIRD_PARTY_NOTICE_NAME"; then
+        echo "The disk image is missing the exact Sparkle license" >&2
+        return 1
+    fi
+    if ! /usr/bin/cmp -s \
+        "$THIRD_PARTY_NOTICE_SOURCE" \
+        "$mount_point/$APP_NAME.app/Contents/Resources/$THIRD_PARTY_NOTICE_NAME"; then
+        echo "The disk image contains an app without the exact Sparkle license" >&2
+        return 1
+    fi
+)
 
 sign_for_local_use() {
     # TCC stores the designated requirement, so signing with a stable identity
@@ -388,7 +442,11 @@ assemble_app() {
     local configuration="$1"
     shift
 
-    local build_arguments=(-c "$configuration" "$@")
+    local build_arguments=(
+        -c "$configuration"
+        --only-use-versions-from-resolved-file
+        "$@"
+    )
 
     # CI compiles the release configuration under the same warning policy as
     # the debug build so a warning that only appears there still fails.
@@ -408,6 +466,9 @@ assemble_app() {
         "$build_directory/Sparkle.framework" \
         "$SPARKLE_FRAMEWORK"
     cp "$ROOT_DIR/Resources/Info.plist" "$APP_CONTENTS/Info.plist"
+    cp \
+        "$THIRD_PARTY_NOTICE_SOURCE" \
+        "$APP_RESOURCES/$THIRD_PARTY_NOTICE_NAME"
     compile_app_icon
     chmod +x "$APP_BINARY"
     install_name_tool \
@@ -536,6 +597,9 @@ case "$MODE" in
     appcast)
         generate_appcast
         ;;
+    validate-package)
+        verify_packaged_notices
+        ;;
     run)
         launch_debug_app
         ;;
@@ -569,7 +633,7 @@ case "$MODE" in
         exit 1
         ;;
     *)
-        echo "usage: $0 [run|--package|--release-self-signed|--release-notarized|--appcast|--debug|--logs|--telemetry|--verify]" >&2
+        echo "usage: $0 [run|--package|--release-self-signed|--release-notarized|--appcast|--validate-package|--debug|--logs|--telemetry|--verify]" >&2
         exit 2
         ;;
 esac
