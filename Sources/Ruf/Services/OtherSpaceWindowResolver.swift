@@ -49,8 +49,8 @@ enum OtherSpaceWindowResolver {
     private static let windowOptions = 0x2
 
     // Resolved at runtime for the same reason as `_AXUIElementGetWindow`: these
-    // are private SkyLight entry points, so their removal has to degrade to the
-    // previous, Space-blind behaviour rather than stop Ruf from launching.
+    // are private SkyLight entry points, so their removal has to degrade to
+    // conservative app-level targeting rather than stop Ruf from launching.
     private static let entrypoints: Entrypoints? = {
         guard
             let handle = dlopen(
@@ -106,14 +106,21 @@ enum OtherSpaceWindowResolver {
 
         var setTags = 0
         var clearTags = 0
-        guard let windowIdentifiers = entrypoints.copyWindows(
+        // A nil result means the private query failed. Only a successfully
+        // returned empty array proves there are no windows on those Spaces.
+        guard let rawWindowIdentifiers = entrypoints.copyWindows(
             connection,
             0,
             spaceIdentifiers as CFArray,
             windowOptions,
             &setTags,
             &clearTags
-        )?.takeRetainedValue() as? [CGWindowID], !windowIdentifiers.isEmpty else {
+        )?.takeRetainedValue(),
+              let windowIdentifiers = rawWindowIdentifiers as? [CGWindowID]
+        else {
+            return nil
+        }
+        guard !windowIdentifiers.isEmpty else {
             return []
         }
 
@@ -148,25 +155,33 @@ enum OtherSpaceWindowResolver {
 
     private static func owners(
         of windowIdentifiers: [CGWindowID]
-    ) -> Set<pid_t> {
+    ) -> Set<pid_t>? {
         guard let descriptions = WindowServerDescriptionReader.descriptions(
             for: windowIdentifiers
         ) else {
-            return []
+            return nil
         }
 
-        return descriptions.reduce(into: Set<pid_t>()) { owners, description in
+        var owners: Set<pid_t> = []
+        for description in descriptions {
             // The same window level the on-screen pass uses: level 0 separates
             // ordinary application windows from the menu bar, Control Center
             // and wallpaper windows every application carries around.
-            guard description[kCGWindowLayer as String] as? Int == 0,
-                  let processIdentifier = description[
+            guard let layer = description[kCGWindowLayer as String] as? Int else {
+                return nil
+            }
+            guard layer == 0 else {
+                continue
+            }
+            guard let processIdentifier = description[
                       kCGWindowOwnerPID as String
-                  ] as? Int else {
-                return
+                  ] as? Int
+            else {
+                return nil
             }
 
             owners.insert(pid_t(processIdentifier))
         }
+        return owners
     }
 }

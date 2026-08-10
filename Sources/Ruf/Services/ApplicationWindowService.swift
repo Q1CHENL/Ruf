@@ -146,8 +146,10 @@ enum ApplicationWindowService {
                         isApplicationHidden: hiddenProcessIdentifiers.contains(
                             processIdentifier
                         ),
-                        hasWindowsOnAnotherSpace: otherSpaceWindowOwners?
-                            .contains(processIdentifier) ?? false,
+                        otherSpaceWindowEvidence: otherSpaceWindowEvidence(
+                            for: processIdentifier,
+                            owners: otherSpaceWindowOwners
+                        ),
                         plan: plan,
                         deadline: deadline
                     )
@@ -178,8 +180,10 @@ enum ApplicationWindowService {
                         isApplicationHidden: hiddenProcessIdentifiers.contains(
                             processIdentifier
                         ),
-                        hasWindowsOnAnotherSpace: otherSpaceWindowOwners?
-                            .contains(processIdentifier) ?? false,
+                        otherSpaceWindowEvidence: otherSpaceWindowEvidence(
+                            for: processIdentifier,
+                            owners: otherSpaceWindowOwners
+                        ),
                         plan: plan,
                         deadline: deadline
                     )
@@ -204,7 +208,7 @@ enum ApplicationWindowService {
     private static func queryState(
         for processIdentifier: pid_t,
         isApplicationHidden: Bool,
-        hasWindowsOnAnotherSpace: Bool,
+        otherSpaceWindowEvidence: OtherSpaceWindowEvidence,
         plan: WindowQueryPlan,
         deadline: DispatchTime
     ) -> WindowStateQueryResult {
@@ -228,7 +232,7 @@ enum ApplicationWindowService {
             ),
             isApplicationHidden: isApplicationHidden,
             hasIncompleteWindowReads: query.hasIncompleteWindowReads,
-            hasWindowsOnAnotherSpace: hasWindowsOnAnotherSpace,
+            otherSpaceWindowEvidence: otherSpaceWindowEvidence,
             switchableWindowMinimizedStates: query.windows.map(\.isMinimized)
         )
         let state: ApplicationWindowState?
@@ -249,6 +253,15 @@ enum ApplicationWindowService {
         return WindowStateQueryResult(
             processIdentifier: processIdentifier,
             state: state
+        )
+    }
+
+    private static func otherSpaceWindowEvidence(
+        for processIdentifier: pid_t,
+        owners: Set<pid_t>?
+    ) -> OtherSpaceWindowEvidence {
+        OtherSpaceWindowEvidence(
+            hasWindows: owners?.contains(processIdentifier)
         )
     }
 

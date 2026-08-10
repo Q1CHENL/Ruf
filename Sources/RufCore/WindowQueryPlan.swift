@@ -1,3 +1,20 @@
+public enum OtherSpaceWindowEvidence: Equatable, Sendable {
+    case present
+    case absent
+    case unavailable
+
+    public init(hasWindows: Bool?) {
+        switch hasWindows {
+        case true:
+            self = .present
+        case false:
+            self = .absent
+        case nil:
+            self = .unavailable
+        }
+    }
+}
+
 public enum WindowQueryDisposition: Equatable, Sendable {
     case application
     case singleWindow
@@ -9,7 +26,7 @@ public enum WindowQueryDisposition: Equatable, Sendable {
         hasVisibleWindows: Bool,
         isApplicationHidden: Bool,
         hasIncompleteWindowReads: Bool,
-        hasWindowsOnAnotherSpace: Bool,
+        otherSpaceWindowEvidence: OtherSpaceWindowEvidence,
         switchableWindowMinimizedStates: [Bool]
     ) -> Self {
         if switchableWindowMinimizedStates == [false] {
@@ -28,12 +45,13 @@ public enum WindowQueryDisposition: Equatable, Sendable {
         // the user somewhere they did not ask to go. Neither Accessibility nor
         // the on-screen window list can see another Space at all, so windows
         // found there are the remaining reason an empty reading is not an
-        // empty application.
+        // empty application. If that private query is unavailable, the absence
+        // of other-Space windows is likewise unproven.
         return hasSwitchableAXWindows
             || hasVisibleWindows
             || isApplicationHidden
             || hasIncompleteWindowReads
-            || hasWindowsOnAnotherSpace
+            || otherSpaceWindowEvidence != .absent
             ? .application
             : .windowless
     }

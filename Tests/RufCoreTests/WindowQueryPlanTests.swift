@@ -2,6 +2,21 @@ import XCTest
 @testable import RufCore
 
 final class WindowQueryPlanTests: XCTestCase {
+    func testOtherSpaceEvidencePreservesUnavailableAnswers() {
+        XCTAssertEqual(
+            OtherSpaceWindowEvidence(hasWindows: nil),
+            .unavailable
+        )
+        XCTAssertEqual(
+            OtherSpaceWindowEvidence(hasWindows: true),
+            .present
+        )
+        XCTAssertEqual(
+            OtherSpaceWindowEvidence(hasWindows: false),
+            .absent
+        )
+    }
+
     func testIncludesOnlyVisibleOrMinimizedWindows() {
         let visibleWindowIdentifiers: [Int32: Set<UInt32>] = [
             20: [201],
@@ -94,7 +109,7 @@ final class WindowQueryPlanTests: XCTestCase {
     // WindowServer's Space bookkeeping is the only thing that contradicts them.
     func testWindowsOnAnotherSpaceOutweighTwoEmptyReadings() {
         XCTAssertEqual(
-            resolve(hasWindowsOnAnotherSpace: true),
+            resolve(otherSpaceWindowEvidence: .present),
             .application
         )
 
@@ -107,10 +122,17 @@ final class WindowQueryPlanTests: XCTestCase {
             resolve(
                 hasSwitchableAXWindows: true,
                 hasVisibleWindows: true,
-                hasWindowsOnAnotherSpace: true,
+                otherSpaceWindowEvidence: .present,
                 switchableWindowMinimizedStates: [false]
             ),
             .singleWindow
+        )
+    }
+
+    func testUnavailableOtherSpaceEvidenceNeverReportsWindowless() {
+        XCTAssertEqual(
+            resolve(otherSpaceWindowEvidence: .unavailable),
+            .application
         )
     }
 
@@ -119,7 +141,7 @@ final class WindowQueryPlanTests: XCTestCase {
         hasVisibleWindows: Bool = false,
         isApplicationHidden: Bool = false,
         hasIncompleteWindowReads: Bool = false,
-        hasWindowsOnAnotherSpace: Bool = false,
+        otherSpaceWindowEvidence: OtherSpaceWindowEvidence = .absent,
         switchableWindowMinimizedStates: [Bool] = []
     ) -> WindowQueryDisposition {
         WindowQueryDisposition.resolve(
@@ -127,7 +149,7 @@ final class WindowQueryPlanTests: XCTestCase {
             hasVisibleWindows: hasVisibleWindows,
             isApplicationHidden: isApplicationHidden,
             hasIncompleteWindowReads: hasIncompleteWindowReads,
-            hasWindowsOnAnotherSpace: hasWindowsOnAnotherSpace,
+            otherSpaceWindowEvidence: otherSpaceWindowEvidence,
             switchableWindowMinimizedStates: switchableWindowMinimizedStates
         )
     }
