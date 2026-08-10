@@ -40,7 +40,7 @@ final class FocusedWindowMover: NSObject {
     private enum MutationPurpose: Sendable {
         case frame(animationIdentifier: UInt64)
         case animationCompletion(animationIdentifier: UInt64)
-        case placement
+        case placement(projectionToken: WindowMovementProjectionToken?)
 
         var animationIdentifier: UInt64? {
             switch self {
@@ -65,6 +65,13 @@ final class FocusedWindowMover: NSObject {
         let window: AXUIElement
         let mutations: [WindowFrameMutation]
         let purpose: MutationPurpose
+
+        var projectionIdentifier: UInt64? {
+            guard case let .placement(projectionToken) = purpose else {
+                return nil
+            }
+            return projectionToken?.identifier
+        }
     }
 
     private static let animationDuration: CFTimeInterval = 0.2
@@ -86,6 +93,8 @@ final class FocusedWindowMover: NSObject {
         WindowMutationRequest,
         UInt64
     >()
+    private var projectedMovement = WindowMovementProjectionState()
+    private var projectedWindow: AXUIElement?
 
     func move(
         _ direction: WindowMoveDirection,
@@ -97,13 +106,20 @@ final class FocusedWindowMover: NSObject {
 
         let screens = screenSnapshots()
         guard screens.count > 1 else {
+            invalidateProjectedMovement()
             stopAnimation(.displayConfigurationChanged)
             return
         }
 
         guard let window = focusedWindow() else {
+            invalidateProjectedMovement()
             return
         }
+
+        let projection = validProjectedMovement(
+            for: window.element,
+            screens: screens
+        )
 
         let retargeting: (
             animation: ActiveAnimation,
@@ -129,12 +145,14 @@ final class FocusedWindowMover: NSObject {
         }
 
         let planningFrame = retargeting?.animation.destinationFrame
+            ?? projection?.destinationFrame
             ?? window.frame
         guard let plan = planner.plan(
             windowFrame: planningFrame,
             displays: screens.map(\.geometry),
             direction: direction,
             preferredSourceDisplay: retargeting?.source
+                ?? projection?.destinationDisplay
         ), let destinationScreen = screens.first(where: {
             $0.geometry == plan.destinationDisplay
         }) else {
@@ -142,7 +160,7 @@ final class FocusedWindowMover: NSObject {
         }
 
         let mutationPlan = WindowMovementMutationPlan(
-            from: window.frame,
+            from: retargeting == nil ? planningFrame : window.frame,
             to: plan.destinationFrame
         )
         guard !mutationPlan.requiresResize
@@ -152,10 +170,15 @@ final class FocusedWindowMover: NSObject {
 
         if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             stopAnimation(.retargeted)
+            let projection = projectedMovement.project(
+                destinationFrame: plan.destinationFrame,
+                destinationDisplay: plan.destinationDisplay
+            )
+            projectedWindow = window.element
             placeWindow(
                 target: window.mutationTarget,
                 with: mutationPlan,
-                purpose: .placement
+                purpose: .placement(projectionToken: projection.token)
             )
             return
         }
@@ -165,6 +188,8 @@ final class FocusedWindowMover: NSObject {
            previous.style == .outline,
            style == .outline {
             startFrame = previous.currentFrame
+        } else if retargeting == nil, let projection {
+            startFrame = projection.destinationFrame
         } else {
             startFrame = window.frame
         }
@@ -180,6 +205,7 @@ final class FocusedWindowMover: NSObject {
     }
 
     func stop() {
+        invalidateProjectedMovement()
         stopAnimation(.shutdown)
     }
 
@@ -206,7 +232,7 @@ final class FocusedWindowMover: NSObject {
             placeWindow(
                 target: mutationTarget,
                 with: mutationPlan,
-                purpose: .placement
+                purpose: .placement(projectionToken: nil)
             )
             return
         }
@@ -341,7 +367,7 @@ final class FocusedWindowMover: NSObject {
         placeWindow(
             target: animation.mutationTarget,
             with: animation.mutationPlan,
-            purpose: .placement,
+            purpose: .placement(projectionToken: nil),
             synchronously: reason == .shutdown
         )
     }
@@ -451,8 +477,58 @@ final class FocusedWindowMover: NSObject {
                         : .finalPlacementFailed
                 )
             }
-        case .placement:
-            break
+        case let .placement(projectionToken):
+            guard let projectionToken else {
+                return
+            }
+
+            switch projectedMovement.finish(
+                projectionToken,
+                succeeded: resolution == .proceed
+            ) {
+            case .unchanged:
+                break
+            case .cleared:
+                projectedWindow = nil
+            case let .failed(identifier):
+                discardPendingProjectedMovements(identifier: identifier)
+                if projectedMovement.current == nil {
+                    projectedWindow = nil
+                }
+            }
+        }
+    }
+
+    private func validProjectedMovement(
+        for window: AXUIElement,
+        screens: [ScreenSnapshot]
+    ) -> WindowMovementProjection? {
+        guard let projection = projectedMovement.current else {
+            projectedWindow = nil
+            return nil
+        }
+        guard let projectedWindow,
+              CFEqual(projectedWindow, window),
+              screens.contains(where: {
+                  $0.geometry == projection.destinationDisplay
+              }) else {
+            invalidateProjectedMovement()
+            return nil
+        }
+        return projection
+    }
+
+    private func invalidateProjectedMovement() {
+        projectedWindow = nil
+        guard let identifier = projectedMovement.invalidate() else {
+            return
+        }
+        discardPendingProjectedMovements(identifier: identifier)
+    }
+
+    private func discardPendingProjectedMovements(identifier: UInt64) {
+        windowWrites.removePendingRequests {
+            $0.projectionIdentifier == identifier
         }
     }
 

@@ -42,6 +42,14 @@ public struct CoalescingRequestQueue<
         }
     }
 
+    public mutating func removePendingRequests(
+        where shouldRemove: (Request) -> Bool
+    ) {
+        pendingRequests.removeAll {
+            shouldRemove($0.value)
+        }
+    }
+
     public mutating func completeCurrentRequest() -> Request? {
         guard !pendingRequests.isEmpty else {
             isProcessing = false

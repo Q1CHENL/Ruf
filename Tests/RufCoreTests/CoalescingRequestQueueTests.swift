@@ -42,6 +42,20 @@ final class CoalescingRequestQueueTests: XCTestCase {
         XCTAssertNil(queue.completeCurrentRequest())
     }
 
+    func testCanDiscardPendingRequestsByValueWithoutAffectingTheActiveOne() {
+        var queue = CoalescingRequestQueue<String, Int>()
+
+        XCTAssertEqual(queue.submit("active", coalescingKey: nil), "active")
+        XCTAssertNil(queue.submit("projection-1", coalescingKey: nil))
+        XCTAssertNil(queue.submit("keep", coalescingKey: nil))
+        XCTAssertNil(queue.submit("projection-2", coalescingKey: nil))
+
+        queue.removePendingRequests { $0.hasPrefix("projection-") }
+
+        XCTAssertEqual(queue.completeCurrentRequest(), "keep")
+        XCTAssertNil(queue.completeCurrentRequest())
+    }
+
     func testDoesNotCoalesceAcrossAnOrderedBarrier() {
         var queue = CoalescingRequestQueue<String, Int>()
 

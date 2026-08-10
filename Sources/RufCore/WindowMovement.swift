@@ -79,6 +79,99 @@ public struct DisplayGeometry: Equatable, Sendable {
     }
 }
 
+public struct WindowMovementProjectionToken: Equatable, Sendable {
+    public let identifier: UInt64
+    public let revision: UInt64
+
+    init(identifier: UInt64, revision: UInt64) {
+        self.identifier = identifier
+        self.revision = revision
+    }
+}
+
+public struct WindowMovementProjection: Equatable, Sendable {
+    public let token: WindowMovementProjectionToken
+    public let destinationFrame: CGRect
+    public let destinationDisplay: DisplayGeometry
+
+    init(
+        token: WindowMovementProjectionToken,
+        destinationFrame: CGRect,
+        destinationDisplay: DisplayGeometry
+    ) {
+        self.token = token
+        self.destinationFrame = destinationFrame
+        self.destinationDisplay = destinationDisplay
+    }
+}
+
+public enum WindowMovementProjectionResolution: Equatable, Sendable {
+    case unchanged
+    case cleared
+    case failed(identifier: UInt64)
+}
+
+public struct WindowMovementProjectionState: Equatable, Sendable {
+    public private(set) var current: WindowMovementProjection?
+    private var nextIdentifier: UInt64 = 0
+
+    public init() {}
+
+    @discardableResult
+    public mutating func project(
+        destinationFrame: CGRect,
+        destinationDisplay: DisplayGeometry
+    ) -> WindowMovementProjection {
+        let token: WindowMovementProjectionToken
+        if let current {
+            token = WindowMovementProjectionToken(
+                identifier: current.token.identifier,
+                revision: current.token.revision + 1
+            )
+        } else {
+            nextIdentifier += 1
+            token = WindowMovementProjectionToken(
+                identifier: nextIdentifier,
+                revision: 1
+            )
+        }
+
+        let projection = WindowMovementProjection(
+            token: token,
+            destinationFrame: destinationFrame,
+            destinationDisplay: destinationDisplay
+        )
+        current = projection
+        return projection
+    }
+
+    @discardableResult
+    public mutating func finish(
+        _ token: WindowMovementProjectionToken,
+        succeeded: Bool
+    ) -> WindowMovementProjectionResolution {
+        guard succeeded else {
+            if current?.token.identifier == token.identifier {
+                current = nil
+            }
+            return .failed(identifier: token.identifier)
+        }
+
+        guard current?.token == token else {
+            return .unchanged
+        }
+        current = nil
+        return .cleared
+    }
+
+    @discardableResult
+    public mutating func invalidate() -> UInt64? {
+        let identifier = current?.token.identifier
+        current = nil
+        return identifier
+    }
+}
+
 public struct WindowMovementPlan: Sendable {
     public let destinationDisplay: DisplayGeometry
     public let destinationFrame: CGRect
