@@ -61,6 +61,7 @@ public enum NewWindowMenuItemMatcher {
 
 public enum NewWindowMenuSearchOutcome: Equatable, Sendable {
     case actionRequested
+    case actionFailed
     case incomplete
     case noMatch
 }
@@ -92,7 +93,12 @@ public enum NewWindowMenuSearchDecision {
         after outcome: NewWindowMenuSearchOutcome,
         hasTimeRemaining: Bool
     ) -> Bool {
-        outcome == .incomplete && hasTimeRemaining
+        switch outcome {
+        case .actionFailed, .incomplete:
+            hasTimeRemaining
+        case .actionRequested, .noMatch:
+            false
+        }
     }
 
     // Polling waits for a menu tree that is still being built. A tree that

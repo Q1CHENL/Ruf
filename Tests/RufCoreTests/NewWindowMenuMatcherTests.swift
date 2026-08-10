@@ -214,7 +214,7 @@ final class NewWindowMenuSearchDecisionTests: XCTestCase {
         )
     }
 
-    func testRetriesOnlyIncompleteSearchesWhileTimeRemains() {
+    func testRetriesIncompleteSearchesAndFailedActionsWhileTimeRemains() {
         XCTAssertTrue(
             NewWindowMenuSearchDecision.shouldRetry(
                 after: .incomplete,
@@ -224,6 +224,18 @@ final class NewWindowMenuSearchDecisionTests: XCTestCase {
         XCTAssertFalse(
             NewWindowMenuSearchDecision.shouldRetry(
                 after: .incomplete,
+                hasTimeRemaining: false
+            )
+        )
+        XCTAssertTrue(
+            NewWindowMenuSearchDecision.shouldRetry(
+                after: .actionFailed,
+                hasTimeRemaining: true
+            )
+        )
+        XCTAssertFalse(
+            NewWindowMenuSearchDecision.shouldRetry(
+                after: .actionFailed,
                 hasTimeRemaining: false
             )
         )

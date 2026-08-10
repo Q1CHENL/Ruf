@@ -83,7 +83,7 @@ enum NewWindowMenuService {
         var previousCoverage: SearchCoverage?
 
         while !Task.isCancelled {
-            let outcome: NewWindowMenuSearchOutcome
+            var outcome: NewWindowMenuSearchOutcome
             var coverage = SearchCoverage(
                 visited: 0,
                 queued: 0,
@@ -103,36 +103,37 @@ enum NewWindowMenuService {
                 outcome = .noMatch
             }
 
+            if outcome == .incomplete,
+               NewWindowMenuSearchDecision.shouldPressDeferredFallback(
+                   hasFallback: shortcutFallback != nil,
+                   coverageRepeated: coverage == previousCoverage
+               ), let shortcutFallback {
+                outcome = requestNewWindowAction(on: shortcutFallback)
+            }
+
             switch outcome {
             case .actionRequested:
                 return .menuActionRequested
             case .noMatch:
                 return .unavailable
+            case .actionFailed:
+                shortcutFallback = nil
+                previousCoverage = nil
             case .incomplete:
-                if NewWindowMenuSearchDecision.shouldPressDeferredFallback(
-                    hasFallback: shortcutFallback != nil,
-                    coverageRepeated: coverage == previousCoverage
-                ), let shortcutFallback {
-                    return requestNewWindowAction(
-                        on: shortcutFallback
-                    ) == .actionRequested
-                        ? .menuActionRequested
-                        : .unavailable
-                }
-
                 previousCoverage = coverage
-                guard NewWindowMenuSearchDecision.shouldRetry(
-                    after: outcome,
-                    hasTimeRemaining: DispatchTime.now() < deadline
-                ) else {
-                    return .unavailable
-                }
+            }
 
-                do {
-                    try await Task.sleep(for: retryInterval)
-                } catch {
-                    return .unavailable
-                }
+            guard NewWindowMenuSearchDecision.shouldRetry(
+                after: outcome,
+                hasTimeRemaining: DispatchTime.now() < deadline
+            ) else {
+                return .unavailable
+            }
+
+            do {
+                try await Task.sleep(for: retryInterval)
+            } catch {
+                return .unavailable
             }
         }
 
@@ -300,7 +301,7 @@ enum NewWindowMenuService {
                 if entry.isInsideNewWindowSubmenu {
                     return requestNewWindowAction(on: element)
                 }
-                shortcutFallback = shortcutFallback ?? element
+                shortcutFallback = element
             case .none:
                 break
             }
@@ -370,7 +371,7 @@ enum NewWindowMenuService {
                 kAXPressAction as CFString
             )
         }
-        return error == .success ? .actionRequested : .noMatch
+        return error == .success ? .actionRequested : .actionFailed
     }
 
     private static func menuChildren(
