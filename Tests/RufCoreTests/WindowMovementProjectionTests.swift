@@ -66,7 +66,7 @@ final class WindowMovementProjectionTests: XCTestCase {
 
         XCTAssertEqual(
             projections.finish(first.token, succeeded: false),
-            .failed(identifier: first.token.identifier)
+            .failed
         )
         XCTAssertNil(projections.current)
     }
@@ -90,7 +90,7 @@ final class WindowMovementProjectionTests: XCTestCase {
 
         XCTAssertEqual(
             projections.finish(first.token, succeeded: false),
-            .failed(identifier: first.token.identifier)
+            .failed
         )
         XCTAssertEqual(projections.current, replacement)
     }

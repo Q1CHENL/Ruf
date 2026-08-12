@@ -46,19 +46,16 @@ final class WindowMovementOutlineController {
         panel.animationBehavior = .none
     }
 
-    func show(accessibilityFrame: CGRect) {
+    func show(frame: CGRect) {
         updateAppearance()
-        update(accessibilityFrame: accessibilityFrame)
+        update(frame: frame)
         if !panel.isVisible {
             panel.orderFrontRegardless()
         }
     }
 
-    func update(accessibilityFrame: CGRect) {
-        panel.setFrame(
-            appKitFrame(from: accessibilityFrame),
-            display: true
-        )
+    func update(frame: CGRect) {
+        panel.setFrame(frame, display: true)
     }
 
     func hide() {
@@ -73,15 +70,5 @@ final class WindowMovementOutlineController {
         outlineView.layer?.borderColor = accentColor
             .withAlphaComponent(0.9)
             .cgColor
-    }
-
-    private func appKitFrame(from accessibilityFrame: CGRect) -> CGRect {
-        let primaryDisplayHeight = CGDisplayBounds(CGMainDisplayID()).height
-        return CGRect(
-            x: accessibilityFrame.minX,
-            y: primaryDisplayHeight - accessibilityFrame.maxY,
-            width: accessibilityFrame.width,
-            height: accessibilityFrame.height
-        )
     }
 }

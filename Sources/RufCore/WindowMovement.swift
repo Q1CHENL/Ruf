@@ -46,18 +46,6 @@ public enum WindowMutationOutcome: Equatable, Sendable {
     case failed
 }
 
-public enum WindowMutationBackend: Equatable, Sendable {
-    case appKit
-    case accessibility
-
-    public static func forProcess(
-        target: Int32,
-        current: Int32
-    ) -> Self {
-        target == current ? .appKit : .accessibility
-    }
-}
-
 public enum WindowMutationPolicy {
     public static func accepts(_ outcome: WindowMutationOutcome) -> Bool {
         switch outcome {
@@ -108,7 +96,7 @@ public struct WindowMovementProjection: Equatable, Sendable {
 public enum WindowMovementProjectionResolution: Equatable, Sendable {
     case unchanged
     case cleared
-    case failed(identifier: UInt64)
+    case failed
 }
 
 public struct WindowMovementProjectionState: Equatable, Sendable {
@@ -154,7 +142,7 @@ public struct WindowMovementProjectionState: Equatable, Sendable {
             if current?.token.identifier == token.identifier {
                 current = nil
             }
-            return .failed(identifier: token.identifier)
+            return .failed
         }
 
         guard current?.token == token else {

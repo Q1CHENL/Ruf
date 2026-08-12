@@ -234,23 +234,6 @@ final class WindowMovementPlannerTests: XCTestCase {
         XCTAssertFalse(WindowMutationPolicy.accepts(.failed))
     }
 
-    func testRoutesCurrentApplicationMutationsThroughAppKit() {
-        XCTAssertEqual(
-            WindowMutationBackend.forProcess(
-                target: 42,
-                current: 42
-            ),
-            .appKit
-        )
-        XCTAssertEqual(
-            WindowMutationBackend.forProcess(
-                target: 7,
-                current: 42
-            ),
-            .accessibility
-        )
-    }
-
     func testAnimationStopPolicySettlesOnlyAbandonedReachableDestinations() {
         XCTAssertTrue(
             WindowMovementAnimationStopReason.focusedWindowChanged

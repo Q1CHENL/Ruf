@@ -251,7 +251,7 @@ final class FocusedWindowMover: NSObject {
         )
 
         if style == .outline {
-            outlineController.show(accessibilityFrame: startFrame)
+            outlineController.show(frame: appKitFrame(from: startFrame))
         }
 
         let displayLink = destinationScreen.screen.displayLink(
@@ -289,7 +289,7 @@ final class FocusedWindowMover: NSObject {
         activeAnimation?.currentFrame = frame
 
         if animation.style == .outline {
-            outlineController.update(accessibilityFrame: frame)
+            outlineController.update(frame: appKitFrame(from: frame))
         }
 
         if progress >= 1 {
@@ -490,8 +490,10 @@ final class FocusedWindowMover: NSObject {
                 break
             case .cleared:
                 projectedWindow = nil
-            case let .failed(identifier):
-                discardPendingProjectedMovements(identifier: identifier)
+            case .failed:
+                discardPendingProjectedMovements(
+                    identifier: projectionToken.identifier
+                )
                 if projectedMovement.current == nil {
                     projectedWindow = nil
                 }
@@ -536,11 +538,6 @@ final class FocusedWindowMover: NSObject {
         guard let application = NSWorkspace.shared.frontmostApplication else {
             return nil
         }
-        let mutationBackend = WindowMutationBackend.forProcess(
-            target: application.processIdentifier,
-            current: ProcessInfo.processInfo.processIdentifier
-        )
-
         let applicationElement = AXClientContext.applicationElement(
             for: application.processIdentifier
         )
@@ -600,13 +597,13 @@ final class FocusedWindowMover: NSObject {
         }
 
         let mutationTarget: WindowMutationTarget
-        switch mutationBackend {
-        case .appKit:
+        if application.processIdentifier
+            == ProcessInfo.processInfo.processIdentifier {
             guard let keyWindow = NSApp.keyWindow, keyWindow.isVisible else {
                 return nil
             }
             mutationTarget = .appKit(keyWindow)
-        case .accessibility:
+        } else {
             mutationTarget = .accessibility(window)
         }
 
