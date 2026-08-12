@@ -341,23 +341,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         self.openSpan = nil
     }
 
-    private func cancelSwitcher() {
+    private func cancelSwitcher(forSwitcherGesture gestureID: UInt64? = nil) {
         snapshotTask?.cancel()
         snapshotTask = nil
         endOpenSpan("cancelled")
-        loadingSession.cancelLoading()
-        keyboardEventTap.resetInputSession()
-        model.cancel()
-        panelController.cancel()
-    }
 
-    private func cancelSwitcher(forSwitcherGesture gestureID: UInt64) {
-        snapshotTask?.cancel()
-        snapshotTask = nil
-        endOpenSpan("cancelled")
-        keyboardEventTap.resetInputSession(
-            forSwitcherGesture: gestureID
-        )
+        if let gestureID {
+            keyboardEventTap.resetInputSession(
+                forSwitcherGesture: gestureID
+            )
+        } else {
+            loadingSession.cancelLoading()
+            keyboardEventTap.resetInputSession()
+        }
+
         model.cancel()
         panelController.cancel()
     }

@@ -40,29 +40,30 @@ public struct SwitcherGestureActions: Equatable, Sendable {
 }
 
 public struct SwitcherLoadingSession: Sendable {
-    private var activeGestureID: UInt64?
-    private var pendingActions: [SwitcherAction] = []
+    private var activeGesture: SwitcherGestureActions?
     private var deferredGestures: [SwitcherGestureActions] = []
 
     public init() {}
 
     public var isLoading: Bool {
-        activeGestureID != nil
+        activeGesture != nil
     }
 
     public mutating func beginLoading(for gestureID: UInt64) {
-        activeGestureID = gestureID
-        pendingActions = []
+        activeGesture = SwitcherGestureActions(
+            gestureID: gestureID,
+            actions: []
+        )
     }
 
     public mutating func receive(
         _ command: SwitcherCommand
     ) -> SwitcherLoadingDisposition {
-        guard let activeGestureID else {
+        guard let activeGesture else {
             return .handleImmediately
         }
 
-        guard command.gestureID == activeGestureID else {
+        guard command.gestureID == activeGesture.gestureID else {
             deferCommand(command)
             return .queued
         }
@@ -72,18 +73,21 @@ public struct SwitcherLoadingSession: Sendable {
             return .cancelLoading
         }
 
-        pendingActions.append(command.action)
+        self.activeGesture?.append(command.action)
         return .queued
     }
 
     public mutating func finishLoading(
         for gestureID: UInt64
     ) -> SwitcherActionReplayPlan? {
-        guard activeGestureID == gestureID else {
+        guard let activeGesture,
+              activeGesture.gestureID == gestureID else {
             return nil
         }
 
-        let plan = SwitcherActionReplayPlan(pendingActions: pendingActions)
+        let plan = SwitcherActionReplayPlan(
+            pendingActions: activeGesture.actions
+        )
         finishActiveLoading()
         return plan
     }
@@ -122,7 +126,6 @@ public struct SwitcherLoadingSession: Sendable {
     }
 
     private mutating func finishActiveLoading() {
-        activeGestureID = nil
-        pendingActions = []
+        activeGesture = nil
     }
 }
