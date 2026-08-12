@@ -26,7 +26,6 @@ enum NewWindowMenuService {
     private struct SearchCoverage: Equatable {
         let visited: Int
         let queued: Int
-        let wasIncomplete: Bool
     }
 
     // AX has no menu-tree-ready notification. Incomplete reads are polled
@@ -86,8 +85,7 @@ enum NewWindowMenuService {
             var outcome: NewWindowMenuSearchOutcome
             var coverage = SearchCoverage(
                 visited: 0,
-                queued: 0,
-                wasIncomplete: true
+                queued: 0
             )
             switch menuBar(from: applicationElement) {
             case let .found(menuBar):
@@ -103,11 +101,12 @@ enum NewWindowMenuService {
                 outcome = .noMatch
             }
 
+            // A tree that reports identical coverage twice has stopped being
+            // built, so waiting out the remaining budget only delays a match
+            // already in hand.
             if outcome == .incomplete,
-               NewWindowMenuSearchDecision.shouldPressDeferredFallback(
-                   hasFallback: shortcutFallback != nil,
-                   coverageRepeated: coverage == previousCoverage
-               ), let shortcutFallback {
+               coverage == previousCoverage,
+               let shortcutFallback {
                 outcome = requestNewWindowAction(on: shortcutFallback)
             }
 
@@ -182,8 +181,7 @@ enum NewWindowMenuService {
         defer {
             coverage = SearchCoverage(
                 visited: index,
-                queued: elements.count,
-                wasIncomplete: wasIncomplete
+                queued: elements.count
             )
         }
 

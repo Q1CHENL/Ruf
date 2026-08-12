@@ -100,15 +100,4 @@ public enum NewWindowMenuSearchDecision {
             false
         }
     }
-
-    // Polling waits for a menu tree that is still being built. A tree that
-    // reports identical coverage twice has stopped being built, and the part
-    // still reading as incomplete will stay that way, so spending the rest of
-    // the budget on it only delays a match already in hand.
-    public static func shouldPressDeferredFallback(
-        hasFallback: Bool,
-        coverageRepeated: Bool
-    ) -> Bool {
-        hasFallback && coverageRepeated
-    }
 }
