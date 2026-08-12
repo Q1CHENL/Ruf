@@ -89,6 +89,10 @@ public final class AppPreferences {
         !defaults.bool(forKey: Key.launchAtLoginConfigured)
     }
 
+    public var requiresAccessibilityPermission: Bool {
+        switcherMode == .ruf || isWindowMovementEnabled
+    }
+
     public init(defaults: UserDefaults) {
         let switcherMode = defaults.string(forKey: Key.switcherMode)
             .flatMap(AppSwitcherMode.init(rawValue:)) ?? .ruf

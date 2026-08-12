@@ -107,8 +107,7 @@ struct SettingsView: View {
 
             Section("Ruf") {
                 AccessibilitySetting(
-                    isRequired: preferences.switcherMode == .ruf
-                        || preferences.isWindowMovementEnabled,
+                    isRequired: preferences.requiresAccessibilityPermission,
                     onOpenSystemSettings: onOpenAccessibilitySettings
                 )
 
@@ -118,7 +117,7 @@ struct SettingsView: View {
                         action: onShowAbout
                     )
                     SettingsActionButton(
-                        softwareUpdateActionTitle,
+                        softwareUpdateAvailability.actionTitle,
                         action: onCheckForUpdates
                     )
                     SettingsActionButton("Quit Ruf", action: onQuit)
@@ -137,12 +136,6 @@ struct SettingsView: View {
         .onChange(of: preferences.isWindowMovementEnabled) {
             onPreferencesChanged()
         }
-    }
-
-    private var softwareUpdateActionTitle: String {
-        softwareUpdateAvailability.availableVersion.map {
-            "Update Ruf to \($0)…"
-        } ?? "Check for Updates…"
     }
 }
 

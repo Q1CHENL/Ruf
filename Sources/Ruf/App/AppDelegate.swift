@@ -76,7 +76,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
-        if requiresKeyboardEventTap, !keyboardEventTap.isRunning {
+        if preferences.requiresAccessibilityPermission,
+           !keyboardEventTap.isRunning {
             refreshKeyboardCaptureState(
                 accessibilityGranted: AccessibilityPermission.isGranted
             )
@@ -442,19 +443,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func updateSoftwareUpdateMenuItem() {
-        softwareUpdateMenuItem?.title = softwareUpdateActionTitle
+        softwareUpdateMenuItem?.title = softwareUpdateAvailability.actionTitle
         softwareUpdateMenuItem?.isEnabled =
             softwareUpdateController.updater.canCheckForUpdates
     }
 
-    private var softwareUpdateActionTitle: String {
-        softwareUpdateAvailability.availableVersion.map {
-            "Update Ruf to \($0)…"
-        } ?? "Check for Updates…"
-    }
-
     private func updateAccessibilityMenuItem(accessibilityGranted: Bool) {
-        if !requiresKeyboardEventTap || keyboardEventTap.isRunning {
+        if !preferences.requiresAccessibilityPermission
+            || keyboardEventTap.isRunning {
             accessibilityMenuItem?.isHidden = true
         } else {
             accessibilityMenuItem?.isHidden = false
@@ -470,7 +466,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             capturesWindowMovement: preferences.isWindowMovementEnabled
         )
 
-        if !requiresKeyboardEventTap {
+        if !preferences.requiresAccessibilityPermission {
             stopPermissionMonitoring()
             keyboardEventTap.stop()
         } else if accessibilityGranted {
@@ -492,14 +488,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let accessibilityGranted = AccessibilityPermission.isGranted
         refreshKeyboardCaptureState(accessibilityGranted: accessibilityGranted)
 
-        if requiresKeyboardEventTap, !accessibilityGranted {
+        if preferences.requiresAccessibilityPermission,
+           !accessibilityGranted {
             requestAccessibility(openSystemSettings: false)
         }
-    }
-
-    private var requiresKeyboardEventTap: Bool {
-        preferences.switcherMode == .ruf
-            || preferences.isWindowMovementEnabled
     }
 
     private func requestAccessibility(openSystemSettings: Bool) {
