@@ -122,6 +122,21 @@ enum ApplicationWindowService {
         let plan = WindowQueryPlan(
             visibleWindowIdentifiers: visibleWindowIdentifiers
         )
+        let queryCandidate: @Sendable (pid_t) -> WindowStateQueryResult = { processIdentifier in
+            queryState(
+                for: processIdentifier,
+                isApplicationHidden: hiddenProcessIdentifiers.contains(
+                    processIdentifier
+                ),
+                otherSpaceWindowEvidence: OtherSpaceWindowEvidence(
+                    hasWindows: otherSpaceWindowOwners?.contains(
+                        processIdentifier
+                    )
+                ),
+                plan: plan,
+                deadline: deadline
+            )
+        }
 
         return await withTaskGroup(
             of: WindowStateQueryResult.self
@@ -141,18 +156,7 @@ enum ApplicationWindowService {
 
                 dispatchedCount += 1
                 group.addTask {
-                    queryState(
-                        for: processIdentifier,
-                        isApplicationHidden: hiddenProcessIdentifiers.contains(
-                            processIdentifier
-                        ),
-                        otherSpaceWindowEvidence: otherSpaceWindowEvidence(
-                            for: processIdentifier,
-                            owners: otherSpaceWindowOwners
-                        ),
-                        plan: plan,
-                        deadline: deadline
-                    )
+                    queryCandidate(processIdentifier)
                 }
             }
 
@@ -175,18 +179,7 @@ enum ApplicationWindowService {
 
                 dispatchedCount += 1
                 group.addTask {
-                    queryState(
-                        for: processIdentifier,
-                        isApplicationHidden: hiddenProcessIdentifiers.contains(
-                            processIdentifier
-                        ),
-                        otherSpaceWindowEvidence: otherSpaceWindowEvidence(
-                            for: processIdentifier,
-                            owners: otherSpaceWindowOwners
-                        ),
-                        plan: plan,
-                        deadline: deadline
-                    )
+                    queryCandidate(processIdentifier)
                 }
             }
 
@@ -253,15 +246,6 @@ enum ApplicationWindowService {
         return WindowStateQueryResult(
             processIdentifier: processIdentifier,
             state: state
-        )
-    }
-
-    private static func otherSpaceWindowEvidence(
-        for processIdentifier: pid_t,
-        owners: Set<pid_t>?
-    ) -> OtherSpaceWindowEvidence {
-        OtherSpaceWindowEvidence(
-            hasWindows: owners?.contains(processIdentifier)
         )
     }
 
