@@ -52,16 +52,24 @@ struct SettingsView: View {
                         "Navigate selection",
                         keys: "⌘ + ← ↑ ↓ →"
                     )
-                    ShortcutRow(
-                        "Open new window for selected app",
-                        keys: "⌘N"
+                    ConfigurableShortcutRow(
+                        "Jump to first / last",
+                        keys: "⌘Page Up / ⌘Page Down",
+                        isOn: $preferences.isJumpToFirstOrLastEnabled
                     )
-                    ShortcutRow(
+                    ConfigurableShortcutRow(
+                        "Open new window for selected app",
+                        keys: "⌘N",
+                        isOn: $preferences.isNewWindowShortcutEnabled
+                    )
+                    ConfigurableShortcutRow(
                         "Quit selected app",
-                        keys: "⌘Q"
+                        keys: "⌘Q",
+                        isOn: $preferences.isQuitShortcutEnabled
                     )
                 }
                 .opacity(preferences.switcherMode == .ruf ? 1 : 0.45)
+                .disabled(preferences.switcherMode != .ruf)
 
                 LabeledContent("Move current window between displays") {
                     HStack(spacing: 12) {
@@ -94,7 +102,7 @@ struct SettingsView: View {
             } footer: {
                 if preferences.switcherMode == .ruf {
                     Text(
-                        "New Window and Quit act on the selected app after "
+                        "Enabled app actions run after "
                             + "all shortcut keys are released."
                     )
                 } else {
@@ -136,6 +144,9 @@ struct SettingsView: View {
         .onChange(of: preferences.isWindowMovementEnabled) {
             onPreferencesChanged()
         }
+        .onChange(of: preferences.enabledSwitcherShortcuts) {
+            onPreferencesChanged()
+        }
     }
 }
 
@@ -171,6 +182,32 @@ private struct ShortcutRow: View {
             Text(keys)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
+        }
+    }
+}
+
+private struct ConfigurableShortcutRow: View {
+    let title: String
+    let keys: String
+    @Binding var isOn: Bool
+
+    init(_ title: String, keys: String, isOn: Binding<Bool>) {
+        self.title = title
+        self.keys = keys
+        _isOn = isOn
+    }
+
+    var body: some View {
+        LabeledContent(title) {
+            HStack(spacing: 12) {
+                Text(keys)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                Toggle(title, isOn: $isOn)
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+            }
         }
     }
 }

@@ -22,6 +22,13 @@ final class GridNavigationTests: XCTestCase {
         XCTAssertEqual(navigation.moving(from: 3, .backward), 2)
     }
 
+    func testBoundaryMovesJumpToTheFirstAndLastItems() {
+        let navigation = GridNavigation(itemCount: 7)
+
+        XCTAssertEqual(navigation.moving(from: 4, .first), 0)
+        XCTAssertEqual(navigation.moving(from: 2, .last), 6)
+    }
+
     func testHorizontalArrowsContinueAcrossRowBoundaries() {
         let navigation = GridNavigation(itemCount: 7)
 

@@ -24,6 +24,8 @@ public enum KeyboardKeyCode {
     public static let returnKey: Int64 = 36
     public static let keypadEnter: Int64 = 76
     public static let escape: Int64 = 53
+    public static let pageUp: Int64 = 116
+    public static let pageDown: Int64 = 121
     public static let leftArrow: Int64 = 123
     public static let rightArrow: Int64 = 124
     public static let downArrow: Int64 = 125
@@ -76,6 +78,23 @@ public enum KeyboardCommand: Equatable, Sendable {
     case moveFocusedWindow(WindowMoveDirection)
 }
 
+public struct SwitcherShortcuts: OptionSet, Sendable {
+    public let rawValue: Int
+
+    public init(rawValue: Int) {
+        self.rawValue = rawValue
+    }
+
+    public static let jumpToFirstOrLast = Self(rawValue: 1 << 0)
+    public static let openNewWindow = Self(rawValue: 1 << 1)
+    public static let quitApplication = Self(rawValue: 1 << 2)
+    public static let all: Self = [
+        .jumpToFirstOrLast,
+        .openNewWindow,
+        .quitApplication,
+    ]
+}
+
 public struct KeyboardDecision: Equatable, Sendable {
     public let command: KeyboardCommand?
     public let isConsumed: Bool
@@ -114,7 +133,8 @@ public struct KeyboardInputSession: Sendable {
     public mutating func interpret(
         _ input: KeyboardInput,
         capturesCommandTab: Bool,
-        capturesWindowMovement: Bool = true
+        capturesWindowMovement: Bool = true,
+        enabledSwitcherShortcuts: SwitcherShortcuts = .all
     ) -> KeyboardDecision {
         if let pendingSwitcherGesture {
             if let decision = continueSwitcherGesture(
@@ -131,7 +151,10 @@ public struct KeyboardInputSession: Sendable {
             self.pendingSwitcherGesture = nil
         }
 
-        if let action = switcherGestureAction(for: input) {
+        if let action = switcherGestureAction(
+            for: input,
+            enabledShortcuts: enabledSwitcherShortcuts
+        ) {
             lastPendingSwitcherGestureToken += 1
             pendingSwitcherGesture = PendingSwitcherGesture(
                 token: lastPendingSwitcherGestureToken,
@@ -145,7 +168,8 @@ public struct KeyboardInputSession: Sendable {
         let decision = decision(
             for: input,
             capturesCommandTab: capturesCommandTab,
-            capturesWindowMovement: capturesWindowMovement
+            capturesWindowMovement: capturesWindowMovement,
+            enabledSwitcherShortcuts: enabledSwitcherShortcuts
         )
 
         updateSession(for: decision)
@@ -200,7 +224,8 @@ public struct KeyboardInputSession: Sendable {
     }
 
     private func switcherGestureAction(
-        for input: KeyboardInput
+        for input: KeyboardInput,
+        enabledShortcuts: SwitcherShortcuts
     ) -> SwitcherAction? {
         guard isCycling,
               input.kind == .keyDown,
@@ -209,12 +234,14 @@ public struct KeyboardInputSession: Sendable {
             return nil
         }
 
-        if input.keyCode == KeyboardKeyCode.ansiN
+        if enabledShortcuts.contains(.openNewWindow),
+           input.keyCode == KeyboardKeyCode.ansiN
             || input.characters?.lowercased() == "n" {
             return .openNewWindow
         }
 
-        if input.keyCode == KeyboardKeyCode.ansiQ
+        if enabledShortcuts.contains(.quitApplication),
+           input.keyCode == KeyboardKeyCode.ansiQ
             || input.characters?.lowercased() == "q" {
             return .quitApplication
         }
@@ -256,7 +283,8 @@ public struct KeyboardInputSession: Sendable {
     private mutating func decision(
         for input: KeyboardInput,
         capturesCommandTab: Bool,
-        capturesWindowMovement: Bool
+        capturesWindowMovement: Bool,
+        enabledSwitcherShortcuts: SwitcherShortcuts
     ) -> KeyboardDecision {
         if input.kind == .flagsChanged {
             let command: KeyboardCommand? = isCycling
@@ -340,6 +368,12 @@ public struct KeyboardInputSession: Sendable {
             .move(.up)
         case KeyboardKeyCode.downArrow:
             .move(.down)
+        case KeyboardKeyCode.pageUp
+            where enabledSwitcherShortcuts.contains(.jumpToFirstOrLast):
+            .move(.first)
+        case KeyboardKeyCode.pageDown
+            where enabledSwitcherShortcuts.contains(.jumpToFirstOrLast):
+            .move(.last)
         default:
             nil
         }

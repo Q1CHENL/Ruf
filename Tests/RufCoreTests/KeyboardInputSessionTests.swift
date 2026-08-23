@@ -70,6 +70,97 @@ final class KeyboardInputSessionTests: XCTestCase {
         }
     }
 
+    func testPageKeysJumpToTheFirstAndLastSwitcherItems() {
+        let cases: [(Int64, SwitcherAction)] = [
+            (KeyboardKeyCode.pageUp, .move(.first)),
+            (KeyboardKeyCode.pageDown, .move(.last)),
+        ]
+
+        for (keyCode, action) in cases {
+            var session = cyclingSession()
+            let decision = session.interpret(
+                KeyboardInput(
+                    kind: .keyDown,
+                    keyCode: keyCode,
+                    modifiers: [.command],
+                    isRepeat: false
+                ),
+                capturesCommandTab: true
+            )
+
+            XCTAssertEqual(decision, switcherDecision(action))
+        }
+    }
+
+    func testPageKeysPassThroughWhileTheSwitcherIsClosed() {
+        var session = KeyboardInputSession()
+
+        for keyCode in [KeyboardKeyCode.pageUp, KeyboardKeyCode.pageDown] {
+            let decision = session.interpret(
+                KeyboardInput(
+                    kind: .keyDown,
+                    keyCode: keyCode,
+                    modifiers: [.command],
+                    isRepeat: false
+                ),
+                capturesCommandTab: true
+            )
+
+            XCTAssertEqual(
+                decision,
+                KeyboardDecision(command: nil, isConsumed: false)
+            )
+        }
+    }
+
+    func testDisabledOptionalSwitcherShortcutsDoNotTriggerActions() {
+        let cases: [(KeyboardInput, SwitcherShortcuts)] = [
+            (
+                KeyboardInput(
+                    kind: .keyDown,
+                    keyCode: KeyboardKeyCode.pageUp,
+                    modifiers: [.command],
+                    isRepeat: false
+                ),
+                [.openNewWindow, .quitApplication]
+            ),
+            (
+                commandNInput(),
+                [.jumpToFirstOrLast, .quitApplication]
+            ),
+            (
+                commandQInput(),
+                [.jumpToFirstOrLast, .openNewWindow]
+            ),
+        ]
+
+        for (input, enabledShortcuts) in cases {
+            var session = cyclingSession()
+
+            let decision = session.interpret(
+                input,
+                capturesCommandTab: true,
+                enabledSwitcherShortcuts: enabledShortcuts
+            )
+
+            XCTAssertEqual(
+                decision,
+                KeyboardDecision(command: nil, isConsumed: true)
+            )
+            XCTAssertTrue(session.isCycling)
+            XCTAssertNil(session.pendingSwitcherGestureToken)
+
+            XCTAssertEqual(
+                session.interpret(
+                    commandReleaseInput(),
+                    capturesCommandTab: true,
+                    enabledSwitcherShortcuts: enabledShortcuts
+                ),
+                switcherDecision(.commit, isConsumed: false)
+            )
+        }
+    }
+
     func testReturnCommitsTheSelectedTarget() {
         for keyCode in [KeyboardKeyCode.returnKey, KeyboardKeyCode.keypadEnter] {
             var session = cyclingSession()

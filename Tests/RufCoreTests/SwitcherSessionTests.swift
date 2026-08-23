@@ -55,7 +55,7 @@ final class SwitcherSessionTests: XCTestCase {
         XCTAssertEqual(session.selectedIndex, 2)
         XCTAssertEqual(session.itemCount, 4)
 
-        session.move(.forward)
+        session.move(.last)
 
         XCTAssertEqual(session.selectedIndex, 3)
     }

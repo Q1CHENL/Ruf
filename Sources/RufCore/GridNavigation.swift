@@ -1,6 +1,8 @@
 public enum GridMove: Equatable, Sendable {
     case forward
     case backward
+    case first
+    case last
     case left
     case right
     case up
@@ -53,6 +55,10 @@ public struct GridNavigation: Sendable {
             return (index + 1) % itemCount
         case .backward:
             return (index - 1 + itemCount) % itemCount
+        case .first:
+            return 0
+        case .last:
+            return itemCount - 1
         case .left:
             return max(0, index - 1)
         case .right:

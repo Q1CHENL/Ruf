@@ -63,6 +63,29 @@ final class AppPreferencesTests: XCTestCase {
     }
 
     @MainActor
+    func testSwitcherActionShortcutsDefaultOnAndPersistOptOuts() {
+        let suiteName = "AppPreferencesTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let preferences = AppPreferences(defaults: defaults)
+
+        XCTAssertTrue(preferences.isJumpToFirstOrLastEnabled)
+        XCTAssertTrue(preferences.isNewWindowShortcutEnabled)
+        XCTAssertTrue(preferences.isQuitShortcutEnabled)
+
+        preferences.isJumpToFirstOrLastEnabled = false
+        preferences.isNewWindowShortcutEnabled = false
+        preferences.isQuitShortcutEnabled = false
+
+        let reloadedPreferences = AppPreferences(defaults: defaults)
+
+        XCTAssertFalse(reloadedPreferences.isJumpToFirstOrLastEnabled)
+        XCTAssertFalse(reloadedPreferences.isNewWindowShortcutEnabled)
+        XCTAssertFalse(reloadedPreferences.isQuitShortcutEnabled)
+    }
+
+    @MainActor
     func testMenuBarItemDefaultsVisibleAndPersistsHiddenInRufMode() {
         let suiteName = "AppPreferencesTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

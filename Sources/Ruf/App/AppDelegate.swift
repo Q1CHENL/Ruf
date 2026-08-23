@@ -25,7 +25,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private lazy var keyboardEventTap = KeyboardEventTap(
         capturesCommandTab: preferences.switcherMode == .ruf,
-        capturesWindowMovement: preferences.isWindowMovementEnabled
+        capturesWindowMovement: preferences.isWindowMovementEnabled,
+        enabledSwitcherShortcuts: preferences.enabledSwitcherShortcuts
     ) { [weak self] command in
         self?.handle(command)
     }
@@ -463,7 +464,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func refreshKeyboardCaptureState(accessibilityGranted: Bool) {
         keyboardEventTap.setCaptureState(
             capturesCommandTab: preferences.switcherMode == .ruf,
-            capturesWindowMovement: preferences.isWindowMovementEnabled
+            capturesWindowMovement: preferences.isWindowMovementEnabled,
+            enabledSwitcherShortcuts: preferences.enabledSwitcherShortcuts
         )
 
         if !preferences.requiresAccessibilityPermission {

@@ -89,6 +89,7 @@ final class KeyboardEventTap {
     private var pendingGestureTimeoutTask: Task<Void, Never>?
     private var capturesCommandTab: Bool
     private var capturesWindowMovement: Bool
+    private var enabledSwitcherShortcuts: SwitcherShortcuts
 
     fileprivate var isCycling: Bool {
         inputSession.isCycling
@@ -105,10 +106,12 @@ final class KeyboardEventTap {
     init(
         capturesCommandTab: Bool,
         capturesWindowMovement: Bool,
+        enabledSwitcherShortcuts: SwitcherShortcuts,
         commandHandler: @escaping (KeyboardCommand) -> Void
     ) {
         self.capturesCommandTab = capturesCommandTab
         self.capturesWindowMovement = capturesWindowMovement
+        self.enabledSwitcherShortcuts = enabledSwitcherShortcuts
         self.commandHandler = commandHandler
     }
 
@@ -169,20 +172,26 @@ final class KeyboardEventTap {
 
     func setCaptureState(
         capturesCommandTab: Bool,
-        capturesWindowMovement: Bool
+        capturesWindowMovement: Bool,
+        enabledSwitcherShortcuts: SwitcherShortcuts
     ) {
         let commandTabChanged = self.capturesCommandTab != capturesCommandTab
         let windowMovementChanged = self.capturesWindowMovement
             != capturesWindowMovement
-        guard commandTabChanged || windowMovementChanged else {
+        let switcherShortcutsChanged = self.enabledSwitcherShortcuts
+            != enabledSwitcherShortcuts
+        guard commandTabChanged
+            || windowMovementChanged
+            || switcherShortcutsChanged else {
             return
         }
 
-        if commandTabChanged {
+        if commandTabChanged || switcherShortcutsChanged {
             resetInputSession()
         }
         self.capturesCommandTab = capturesCommandTab
         self.capturesWindowMovement = capturesWindowMovement
+        self.enabledSwitcherShortcuts = enabledSwitcherShortcuts
     }
 
     private func tearDownEventTap() {
@@ -241,7 +250,8 @@ final class KeyboardEventTap {
                 characters: characters
             ),
             capturesCommandTab: capturesCommandTab,
-            capturesWindowMovement: capturesWindowMovement
+            capturesWindowMovement: capturesWindowMovement,
+            enabledSwitcherShortcuts: enabledSwitcherShortcuts
         )
         synchronizePendingGestureTimeout(previousToken: previousGestureToken)
 

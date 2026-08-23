@@ -18,6 +18,9 @@ public final class AppPreferences {
         static let launchAtLoginConfigured = "launchAtLoginConfigured"
         static let showsMenuBarItem = "showsMenuBarItem"
         static let switcherMode = "switcherMode"
+        static let jumpToFirstOrLastEnabled = "jumpToFirstOrLastEnabled"
+        static let newWindowShortcutEnabled = "newWindowShortcutEnabled"
+        static let quitShortcutEnabled = "quitShortcutEnabled"
         static let windowMovementEnabled = "windowMovementEnabled"
         static let windowMovementStyle = "windowMovementStyle"
     }
@@ -68,6 +71,45 @@ public final class AppPreferences {
         }
     }
 
+    public var isJumpToFirstOrLastEnabled: Bool {
+        didSet {
+            guard isJumpToFirstOrLastEnabled != oldValue else {
+                return
+            }
+
+            defaults.set(
+                isJumpToFirstOrLastEnabled,
+                forKey: Key.jumpToFirstOrLastEnabled
+            )
+        }
+    }
+
+    public var isNewWindowShortcutEnabled: Bool {
+        didSet {
+            guard isNewWindowShortcutEnabled != oldValue else {
+                return
+            }
+
+            defaults.set(
+                isNewWindowShortcutEnabled,
+                forKey: Key.newWindowShortcutEnabled
+            )
+        }
+    }
+
+    public var isQuitShortcutEnabled: Bool {
+        didSet {
+            guard isQuitShortcutEnabled != oldValue else {
+                return
+            }
+
+            defaults.set(
+                isQuitShortcutEnabled,
+                forKey: Key.quitShortcutEnabled
+            )
+        }
+    }
+
     public var windowMovementStyle: WindowMovementStyle {
         didSet {
             guard windowMovementStyle != oldValue else {
@@ -93,6 +135,20 @@ public final class AppPreferences {
         switcherMode == .ruf || isWindowMovementEnabled
     }
 
+    public var enabledSwitcherShortcuts: SwitcherShortcuts {
+        var shortcuts: SwitcherShortcuts = []
+        if isJumpToFirstOrLastEnabled {
+            shortcuts.insert(.jumpToFirstOrLast)
+        }
+        if isNewWindowShortcutEnabled {
+            shortcuts.insert(.openNewWindow)
+        }
+        if isQuitShortcutEnabled {
+            shortcuts.insert(.quitApplication)
+        }
+        return shortcuts
+    }
+
     public init(defaults: UserDefaults) {
         let switcherMode = defaults.string(forKey: Key.switcherMode)
             .flatMap(AppSwitcherMode.init(rawValue:)) ?? .ruf
@@ -105,6 +161,15 @@ public final class AppPreferences {
         showsMenuBarItem = switcherMode == .system
             ? true
             : storedMenuBarVisibility
+        isJumpToFirstOrLastEnabled = defaults.object(
+            forKey: Key.jumpToFirstOrLastEnabled
+        ) as? Bool ?? true
+        isNewWindowShortcutEnabled = defaults.object(
+            forKey: Key.newWindowShortcutEnabled
+        ) as? Bool ?? true
+        isQuitShortcutEnabled = defaults.object(
+            forKey: Key.quitShortcutEnabled
+        ) as? Bool ?? true
         isWindowMovementEnabled = defaults.object(
             forKey: Key.windowMovementEnabled
         ) as? Bool ?? true
