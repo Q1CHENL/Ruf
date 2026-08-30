@@ -29,6 +29,11 @@ struct SettingsView: View {
                 )
                 .disabled(preferences.switcherMode != .ruf)
 
+                Toggle(
+                    "Show App Resource Usage",
+                    isOn: $preferences.showsApplicationResourceUsage
+                )
+
                 LaunchAtLoginSetting(
                     onUserChange: preferences.markLaunchAtLoginConfigured
                 )
@@ -51,6 +56,10 @@ struct SettingsView: View {
                     ShortcutRow(
                         "Navigate selection",
                         keys: "⌘ + ← ↑ ↓ →"
+                    )
+                    ShortcutRow(
+                        "Toggle app resource usage",
+                        keys: "⌘I"
                     )
                     ConfigurableShortcutRow(
                         "Jump to first / last",

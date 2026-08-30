@@ -113,6 +113,65 @@ final class KeyboardInputSessionTests: XCTestCase {
         }
     }
 
+    func testCommandITogglesResourceUsageWithoutEndingTheSession() {
+        var session = cyclingSession()
+
+        let decision = session.interpret(
+            KeyboardInput(
+                kind: .keyDown,
+                keyCode: KeyboardKeyCode.ansiI,
+                modifiers: [.command],
+                isRepeat: false
+            ),
+            capturesCommandTab: true
+        )
+
+        XCTAssertEqual(
+            decision,
+            switcherDecision(.toggleApplicationResourceUsage)
+        )
+        XCTAssertTrue(session.isCycling)
+    }
+
+    func testRepeatedCommandIDoesNotToggleResourceUsageAgain() {
+        var session = cyclingSession()
+
+        let decision = session.interpret(
+            KeyboardInput(
+                kind: .keyDown,
+                keyCode: KeyboardKeyCode.ansiI,
+                modifiers: [.command],
+                isRepeat: true
+            ),
+            capturesCommandTab: true
+        )
+
+        XCTAssertEqual(
+            decision,
+            KeyboardDecision(command: nil, isConsumed: true)
+        )
+        XCTAssertTrue(session.isCycling)
+    }
+
+    func testCommandIPassesThroughWhileTheSwitcherIsClosed() {
+        var session = KeyboardInputSession()
+
+        let decision = session.interpret(
+            KeyboardInput(
+                kind: .keyDown,
+                keyCode: KeyboardKeyCode.ansiI,
+                modifiers: [.command],
+                isRepeat: false
+            ),
+            capturesCommandTab: true
+        )
+
+        XCTAssertEqual(
+            decision,
+            KeyboardDecision(command: nil, isConsumed: false)
+        )
+    }
+
     func testDisabledOptionalSwitcherShortcutsDoNotTriggerActions() {
         let cases: [(KeyboardInput, SwitcherShortcuts)] = [
             (

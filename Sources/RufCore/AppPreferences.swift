@@ -21,6 +21,8 @@ public final class AppPreferences {
         static let jumpToFirstOrLastEnabled = "jumpToFirstOrLastEnabled"
         static let newWindowShortcutEnabled = "newWindowShortcutEnabled"
         static let quitShortcutEnabled = "quitShortcutEnabled"
+        static let showsApplicationResourceUsage =
+            "showsApplicationResourceUsage"
         static let windowMovementEnabled = "windowMovementEnabled"
         static let windowMovementStyle = "windowMovementStyle"
     }
@@ -67,6 +69,19 @@ public final class AppPreferences {
             defaults.set(
                 isWindowMovementEnabled,
                 forKey: Key.windowMovementEnabled
+            )
+        }
+    }
+
+    public var showsApplicationResourceUsage: Bool {
+        didSet {
+            guard showsApplicationResourceUsage != oldValue else {
+                return
+            }
+
+            defaults.set(
+                showsApplicationResourceUsage,
+                forKey: Key.showsApplicationResourceUsage
             )
         }
     }
@@ -173,6 +188,9 @@ public final class AppPreferences {
         isWindowMovementEnabled = defaults.object(
             forKey: Key.windowMovementEnabled
         ) as? Bool ?? true
+        showsApplicationResourceUsage = defaults.object(
+            forKey: Key.showsApplicationResourceUsage
+        ) as? Bool ?? false
         windowMovementStyle = defaults.string(
             forKey: Key.windowMovementStyle
         ).flatMap(WindowMovementStyle.init(rawValue:)) ?? .live

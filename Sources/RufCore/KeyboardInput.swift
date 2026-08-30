@@ -18,6 +18,7 @@ public struct KeyboardModifiers: OptionSet, Sendable {
 }
 
 public enum KeyboardKeyCode {
+    public static let ansiI: Int64 = 34
     public static let ansiN: Int64 = 45
     public static let ansiQ: Int64 = 12
     public static let tab: Int64 = 48
@@ -57,6 +58,7 @@ public struct KeyboardInput: Sendable {
 public enum SwitcherAction: Equatable, Sendable {
     case cycle(backwards: Bool)
     case move(GridMove)
+    case toggleApplicationResourceUsage
     case openNewWindow
     case quitApplication
     case commit
@@ -184,7 +186,7 @@ public struct KeyboardInputSession: Sendable {
         switch command.action {
         case .openNewWindow, .quitApplication, .commit, .cancel:
             reset()
-        case .cycle, .move:
+        case .cycle, .move, .toggleApplicationResourceUsage:
             break
         }
     }
@@ -355,6 +357,19 @@ public struct KeyboardInputSession: Sendable {
         guard input.modifiers.contains(.command) else {
             return KeyboardDecision(
                 command: switcherCommand(.commit),
+                isConsumed: true
+            )
+        }
+
+        let isResourceUsageKey = input.keyCode == KeyboardKeyCode.ansiI
+            || input.characters?.lowercased() == "i"
+        if input.modifiers == [.command],
+           !input.isRepeat,
+           isResourceUsageKey {
+            return KeyboardDecision(
+                command: switcherCommand(
+                    .toggleApplicationResourceUsage
+                ),
                 isConsumed: true
             )
         }

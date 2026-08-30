@@ -23,6 +23,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     )
 
+    private lazy var applicationResourceUsageMonitor =
+        ApplicationResourceUsageMonitor { [weak self] usage in
+            self?.model.updateApplicationResourceUsage(usage)
+        }
+
     private lazy var keyboardEventTap = KeyboardEventTap(
         capturesCommandTab: preferences.switcherMode == .ruf,
         capturesWindowMovement: preferences.isWindowMovementEnabled,
@@ -95,6 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         snapshotTask?.cancel()
+        applicationResourceUsageMonitor.stopSession()
         cancelNewWindowRequests()
         stopPermissionMonitoring()
         keyboardEventTap.stop()
@@ -129,6 +135,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case let .cycle(backwards):
             if model.isPresented {
                 model.move(backwards ? .backward : .forward)
+                synchronizeApplicationResourceUsage()
             } else {
                 loadTargets(
                     backwards: backwards,
@@ -137,6 +144,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         case let .move(move):
             model.move(move)
+            synchronizeApplicationResourceUsage()
+        case .toggleApplicationResourceUsage:
+            preferences.showsApplicationResourceUsage =
+                model.toggleApplicationResourceUsage()
+            synchronizeApplicationResourceUsage()
         case .openNewWindow:
             openNewWindow()
         case .quitApplication:
@@ -198,7 +210,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         let beginSpan = PerformanceLog.begin("switcher.begin")
-        model.begin(with: targets, backwards: backwards)
+        model.begin(
+            with: targets,
+            backwards: backwards,
+            showsApplicationResourceUsage:
+                preferences.showsApplicationResourceUsage
+        )
         PerformanceLog.end(beginSpan)
 
         for action in replayPlan.beforePresentation {
@@ -213,6 +230,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         panelController.show(itemCount: targets.count)
+        synchronizeApplicationResourceUsage()
         endOpenSpan("targets=\(targets.count)")
 
         for action in replayPlan.afterPresentation {
@@ -329,6 +347,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func takeSelection() -> SwitchTarget? {
+        stopApplicationResourceUsage()
         let target = model.finish()
         panelController.hide()
         return target
@@ -357,8 +376,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             keyboardEventTap.resetInputSession()
         }
 
+        stopApplicationResourceUsage()
         model.cancel()
         panelController.cancel()
+    }
+
+    private func synchronizeApplicationResourceUsage() {
+        let isCalloutVisible =
+            panelController.updateApplicationResourceUsageCallout()
+        guard panelController.isVisible,
+              model.showsApplicationResourceUsage else {
+            applicationResourceUsageMonitor.stopSession()
+            model.clearApplicationResourceUsage()
+            return
+        }
+        guard isCalloutVisible,
+              let application = model.selectedTarget?.item.application else {
+            applicationResourceUsageMonitor.deselect()
+            model.clearApplicationResourceUsage()
+            return
+        }
+
+        applicationResourceUsageMonitor.select(application)
+    }
+
+    private func stopApplicationResourceUsage() {
+        applicationResourceUsageMonitor.stopSession()
+        model.clearApplicationResourceUsage()
     }
 
     private func resumeNextSwitcherGesture() {

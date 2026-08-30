@@ -83,4 +83,29 @@ final class SwitcherSessionTests: XCTestCase {
         XCTAssertFalse(session.isPresented)
         XCTAssertNil(session.selectedIndex)
     }
+
+    func testResourceUsageVisibilityCanSeedTheNextSession() {
+        var session = SwitcherSession()
+
+        session.begin(
+            groupIdentifiers: [0, 1],
+            backwards: false,
+            showsApplicationResourceUsage: false
+        )
+        XCTAssertFalse(session.showsApplicationResourceUsage)
+
+        let rememberedVisibility = session.toggleApplicationResourceUsage()
+        XCTAssertTrue(rememberedVisibility)
+        XCTAssertTrue(session.showsApplicationResourceUsage)
+
+        _ = session.finish()
+        XCTAssertFalse(session.showsApplicationResourceUsage)
+
+        session.begin(
+            groupIdentifiers: [0, 1],
+            backwards: false,
+            showsApplicationResourceUsage: rememberedVisibility
+        )
+        XCTAssertTrue(session.showsApplicationResourceUsage)
+    }
 }

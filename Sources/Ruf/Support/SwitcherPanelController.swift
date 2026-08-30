@@ -9,8 +9,11 @@ private final class SwitcherPanel: NSPanel {
 
 @MainActor
 final class SwitcherPanelController {
+    private let model: SwitcherModel
     private let panel: SwitcherPanel
     private let glassView: NSGlassEffectView
+    private let applicationResourceUsageCallout:
+        SwitcherResourceCalloutPanelController
     private let presentationDiagnostics: SwitcherPanelPresentationDiagnostics
     private var previouslyActiveApplication: NSRunningApplication?
 
@@ -31,8 +34,11 @@ final class SwitcherPanelController {
             backing: .buffered,
             defer: false
         )
+        self.model = model
         self.glassView = glassView
         self.panel = panel
+        applicationResourceUsageCallout =
+            SwitcherResourceCalloutPanelController(model: model)
         presentationDiagnostics = SwitcherPanelPresentationDiagnostics(
             panel: panel,
             glassView: glassView
@@ -67,6 +73,10 @@ final class SwitcherPanelController {
         panel.isReleasedWhenClosed = false
         panel.acceptsMouseMovedEvents = true
         panel.animationBehavior = .none
+    }
+
+    var isVisible: Bool {
+        panel.isVisible
     }
 
     func prepare(itemCount: Int) {
@@ -121,6 +131,7 @@ final class SwitcherPanelController {
 
     func hide() {
         presentationDiagnostics.presentationWillEnd()
+        applicationResourceUsageCallout.hide()
         panel.orderOut(nil)
         previouslyActiveApplication = nil
     }
@@ -129,6 +140,30 @@ final class SwitcherPanelController {
         let application = previouslyActiveApplication
         hide()
         application?.activate(options: [.activateAllWindows])
+    }
+
+    @discardableResult
+    func updateApplicationResourceUsageCallout() -> Bool {
+        guard panel.isVisible,
+              model.showsApplicationResourceUsage,
+              let selectedIndex = model.selectedIndex,
+              let screen = panel.screen
+                ?? NSScreen.screens.first(where: {
+                    $0.frame.contains(
+                        CGPoint(x: panel.frame.midX, y: panel.frame.midY)
+                    )
+                }),
+              let placement = SwitcherResourceCalloutPlacement.resolve(
+                  selectedIndex: selectedIndex,
+                  itemCount: model.targets.count,
+                  panelFrame: panel.frame,
+                  visibleFrame: screen.visibleFrame
+              ) else {
+            applicationResourceUsageCallout.hide()
+            return false
+        }
+
+        return applicationResourceUsageCallout.show(placement, parent: panel)
     }
 
     @discardableResult

@@ -46,6 +46,23 @@ final class AppPreferencesTests: XCTestCase {
     }
 
     @MainActor
+    func testResourceUsageDefaultsHiddenAndPersistsOptIn() {
+        let suiteName = "AppPreferencesTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let preferences = AppPreferences(defaults: defaults)
+
+        XCTAssertFalse(preferences.showsApplicationResourceUsage)
+
+        preferences.showsApplicationResourceUsage = true
+
+        let reloadedPreferences = AppPreferences(defaults: defaults)
+
+        XCTAssertTrue(reloadedPreferences.showsApplicationResourceUsage)
+    }
+
+    @MainActor
     func testWindowMovementStyleDefaultsToLiveAndPersistsOutline() {
         let suiteName = "AppPreferencesTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

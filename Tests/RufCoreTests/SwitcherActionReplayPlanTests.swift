@@ -32,4 +32,17 @@ final class SwitcherActionReplayPlanTests: XCTestCase {
         XCTAssertEqual(plan.beforePresentation, actions)
         XCTAssertTrue(plan.afterPresentation.isEmpty)
     }
+
+    func testReplaysResourceUsageToggleBeforePresentation() {
+        let actions: [SwitcherAction] = [
+            .cycle(backwards: false),
+            .toggleApplicationResourceUsage,
+            .move(.right),
+        ]
+
+        let plan = SwitcherActionReplayPlan(pendingActions: actions)
+
+        XCTAssertEqual(plan.beforePresentation, actions)
+        XCTAssertTrue(plan.afterPresentation.isEmpty)
+    }
 }

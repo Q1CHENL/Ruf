@@ -1,6 +1,7 @@
 public struct SwitcherSession: Equatable, Sendable {
     public private(set) var itemCount = 0
     public private(set) var selectedIndex: Int?
+    public private(set) var showsApplicationResourceUsage = false
 
     public init() {}
 
@@ -15,7 +16,8 @@ public struct SwitcherSession: Equatable, Sendable {
     public mutating func begin<Group: Equatable>(
         groupIdentifiers: [Group],
         initialSelectionTargetCount: Int? = nil,
-        backwards: Bool
+        backwards: Bool,
+        showsApplicationResourceUsage: Bool = false
     ) {
         guard let currentGroup = groupIdentifiers.first else {
             clear()
@@ -23,6 +25,8 @@ public struct SwitcherSession: Equatable, Sendable {
         }
 
         itemCount = groupIdentifiers.count
+        self.showsApplicationResourceUsage =
+            showsApplicationResourceUsage
         let resolvedInitialTargetCount = min(
             max(initialSelectionTargetCount ?? itemCount, 0),
             itemCount
@@ -60,6 +64,15 @@ public struct SwitcherSession: Equatable, Sendable {
         selectedIndex = index
     }
 
+    public mutating func toggleApplicationResourceUsage() -> Bool {
+        guard isPresented else {
+            return showsApplicationResourceUsage
+        }
+
+        showsApplicationResourceUsage.toggle()
+        return showsApplicationResourceUsage
+    }
+
     @discardableResult
     public mutating func finish() -> Int? {
         let index = selectedIndex
@@ -74,5 +87,6 @@ public struct SwitcherSession: Equatable, Sendable {
     private mutating func clear() {
         itemCount = 0
         selectedIndex = nil
+        showsApplicationResourceUsage = false
     }
 }
