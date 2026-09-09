@@ -3,6 +3,7 @@ import RufCore
 
 @MainActor
 final class ApplicationResourceUsageMonitor {
+    typealias LaunchDateProvider = @Sendable (pid_t) async -> Date?
     typealias SnapshotProvider = @Sendable (pid_t) async ->
         ProcessTreeResourceSnapshot?
 
@@ -18,6 +19,7 @@ final class ApplicationResourceUsageMonitor {
 
     private let initialSampleInterval: Duration
     private let refreshInterval: Duration
+    private let launchDateProvider: LaunchDateProvider
     private let snapshotProvider: SnapshotProvider
     private let onUpdate:
         @MainActor @Sendable (ApplicationResourceUsage) -> Void
@@ -32,6 +34,7 @@ final class ApplicationResourceUsageMonitor {
     ) {
         initialSampleInterval = .milliseconds(500)
         refreshInterval = .seconds(1)
+        launchDateProvider = Self.processLaunchDate
         snapshotProvider = Self.sample
         self.onUpdate = onUpdate
     }
@@ -39,6 +42,7 @@ final class ApplicationResourceUsageMonitor {
     init(
         initialSampleInterval: Duration,
         refreshInterval: Duration,
+        launchDateProvider: @escaping LaunchDateProvider,
         snapshotProvider: @escaping SnapshotProvider,
         onUpdate: @escaping @MainActor @Sendable (
             ApplicationResourceUsage
@@ -46,6 +50,7 @@ final class ApplicationResourceUsageMonitor {
     ) {
         self.initialSampleInterval = initialSampleInterval
         self.refreshInterval = refreshInterval
+        self.launchDateProvider = launchDateProvider
         self.snapshotProvider = snapshotProvider
         self.onUpdate = onUpdate
     }
@@ -102,6 +107,12 @@ final class ApplicationResourceUsageMonitor {
                 return
             }
 
+            let launchDate: Date?
+            if let knownLaunchDate = nextTarget.launchDate {
+                launchDate = knownLaunchDate
+            } else {
+                launchDate = await launchDateProvider(nextTarget.processIdentifier)
+            }
             var cpuBaseline = ProcessCPUUsageBaseline()
             var isFirstInterval = true
 
@@ -130,7 +141,7 @@ final class ApplicationResourceUsageMonitor {
                             ),
                             memoryBytes: memoryBytes,
                             runningDuration: runningDuration(
-                                since: nextTarget.launchDate
+                                since: launchDate
                             )
                         ),
                         for: nextTarget,
@@ -143,7 +154,7 @@ final class ApplicationResourceUsageMonitor {
                             cpuPercentage: nil,
                             memoryBytes: nil,
                             runningDuration: runningDuration(
-                                since: nextTarget.launchDate
+                                since: launchDate
                             )
                         ),
                         for: nextTarget,
@@ -231,6 +242,35 @@ final class ApplicationResourceUsageMonitor {
         }
         selectedTarget = nil
         onUpdate(unavailableUsage)
+    }
+
+    nonisolated static func processLaunchDate(
+        for processIdentifier: pid_t
+    ) async -> Date? {
+        await Task.detached(priority: .utility) {
+            guard processIdentifier > 0 else {
+                return nil
+            }
+
+            var info = kinfo_proc()
+            var size = MemoryLayout<kinfo_proc>.stride
+            var mib: [Int32] = [
+                CTL_KERN, KERN_PROC, KERN_PROC_PID, processIdentifier,
+            ]
+            guard sysctl(&mib, UInt32(mib.count), &info, &size, nil, 0) == 0,
+                  size == MemoryLayout<kinfo_proc>.stride else {
+                return nil
+            }
+
+            // Calendar start time preserves elapsed time across system sleep.
+            let start = info.kp_proc.p_un.__p_starttime
+            guard start.tv_sec > 0 else {
+                return nil
+            }
+            return Date(timeIntervalSince1970:
+                Double(start.tv_sec) + Double(start.tv_usec) / 1_000_000
+            )
+        }.value
     }
 
     private nonisolated static func sample(

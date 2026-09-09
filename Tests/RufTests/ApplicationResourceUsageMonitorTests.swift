@@ -12,6 +12,10 @@ final class ApplicationResourceUsageMonitorTests: XCTestCase {
         let monitor = ApplicationResourceUsageMonitor(
             initialSampleInterval: .zero,
             refreshInterval: .zero,
+            launchDateProvider: { _ in
+                XCTFail("Known launch dates should not query the kernel")
+                return nil
+            },
             snapshotProvider: { processIdentifier in
                 await snapshots.next(for: processIdentifier)
             },
@@ -81,6 +85,80 @@ final class ApplicationResourceUsageMonitorTests: XCTestCase {
 
         monitor.stopSession()
         await snapshots.finish()
+    }
+
+    func testResolvesMissingApplicationLaunchDate() async {
+        let snapshots = ControlledSnapshotProvider()
+        let recorder = ResourceUsageRecorder()
+        let launchDate = Date().addingTimeInterval(-3_600)
+        let monitor = ApplicationResourceUsageMonitor(
+            initialSampleInterval: .zero,
+            refreshInterval: .zero,
+            launchDateProvider: { pid in
+                XCTAssertEqual(pid, 101)
+                return launchDate
+            },
+            snapshotProvider: { pid in
+                await snapshots.next(for: pid)
+            },
+            onUpdate: { recorder.latest = $0 }
+        )
+
+        monitor.select(
+            processIdentifier: 101,
+            launchDate: nil,
+            isRunning: { true }
+        )
+        await snapshots.send(
+            snapshot(pid: 101, time: 1_000, cpu: 100, memory: 101),
+            to: 101
+        )
+        await waitForRequestCount(2, pid: 101, snapshots: snapshots)
+
+        XCTAssertEqual(recorder.latest.runningDuration ?? -1, 3_600, accuracy: 2)
+        monitor.stopSession()
+        await snapshots.finish()
+    }
+
+    func testUnavailableLaunchDateKeepsOtherMetricsAvailable() async {
+        let snapshots = ControlledSnapshotProvider()
+        let recorder = ResourceUsageRecorder()
+        let monitor = ApplicationResourceUsageMonitor(
+            initialSampleInterval: .zero,
+            refreshInterval: .zero,
+            launchDateProvider: { _ in nil },
+            snapshotProvider: { pid in
+                await snapshots.next(for: pid)
+            },
+            onUpdate: { recorder.latest = $0 }
+        )
+
+        monitor.select(
+            processIdentifier: 101,
+            launchDate: nil,
+            isRunning: { true }
+        )
+        await snapshots.send(
+            snapshot(pid: 101, time: 1_000, cpu: 100, memory: 101),
+            to: 101
+        )
+        await waitForRequestCount(2, pid: 101, snapshots: snapshots)
+
+        XCTAssertNil(recorder.latest.runningDuration)
+        XCTAssertEqual(recorder.latest.memoryBytes, 101)
+        monitor.stopSession()
+        await snapshots.finish()
+    }
+
+    func testReadsCurrentProcessLaunchDateFromKernel() async throws {
+        let beforeQuery = Date()
+        let result = await ApplicationResourceUsageMonitor.processLaunchDate(
+            for: getpid()
+        )
+        let launchDate = try XCTUnwrap(result)
+
+        XCTAssertLessThanOrEqual(launchDate, beforeQuery)
+        XCTAssertGreaterThan(launchDate.timeIntervalSince1970, 0)
     }
 
     private func waitForRequestCount(
