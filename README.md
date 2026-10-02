@@ -16,6 +16,8 @@ keyboard-first window controls.
   Ruf keeps its size when it fits. Full-width and full-height layouts adapt to
   the destination.
 - See Dock badges directly on app icons in the switcher.
+- View the selected app's CPU usage, memory usage, and uptime. Toggle the
+  display with Command-I in the switcher.
 - Choose Ruf or macOS for Command-Tab, and control menu bar visibility and
   launch at login.
 
