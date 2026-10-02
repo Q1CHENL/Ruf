@@ -59,9 +59,18 @@ public enum WindowQueryDisposition: Equatable, Sendable {
 
 public struct WindowQueryPlan: Equatable, Sendable {
     private let visibleWindowIdentifiers: [Int32: Set<UInt32>]
+    private let windowOwnerProcessIdentifiers: Set<Int32>
 
-    public init(visibleWindowIdentifiers: [Int32: Set<UInt32>]) {
+    public init(
+        visibleWindowIdentifiers: [Int32: Set<UInt32>],
+        windowOwnerProcessIdentifiers: Set<Int32>
+    ) {
         self.visibleWindowIdentifiers = visibleWindowIdentifiers
+        self.windowOwnerProcessIdentifiers = windowOwnerProcessIdentifiers
+    }
+
+    public func hasWindows(for processIdentifier: Int32) -> Bool {
+        windowOwnerProcessIdentifiers.contains(processIdentifier)
     }
 
     public func shouldIncludeWindow(

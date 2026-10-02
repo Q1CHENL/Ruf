@@ -4,6 +4,34 @@ import Foundation
 import RufCore
 
 enum ApplicationWindowService {
+    struct Candidate: Sendable {
+        let processIdentifier: pid_t
+        let policy: ApplicationDiscoveryPolicy
+        let isHidden: Bool
+    }
+
+    struct Snapshot: Sendable {
+        let states: [pid_t: ApplicationWindowState]
+        let plan: WindowQueryPlan?
+
+        func includesApplication(
+            _ processIdentifier: pid_t,
+            policy: ApplicationDiscoveryPolicy
+        ) -> Bool {
+            let hasSwitchableWindows: Bool
+            switch states[processIdentifier] {
+            case .singleWindow?, .windows?:
+                hasSwitchableWindows = true
+            case .windowless?, nil:
+                hasSwitchableWindows = false
+            }
+            return policy.shouldInclude(
+                hasVisibleWindows: plan?.hasVisibleWindows(for: processIdentifier) ?? false,
+                hasSwitchableWindows: hasSwitchableWindows
+            )
+        }
+    }
+
     private struct ApplicationWindowsQuery: Sendable {
         let hasSwitchableAXWindows: Bool
         let hasIncompleteWindowReads: Bool
@@ -21,15 +49,11 @@ enum ApplicationWindowService {
     // busy app from consuming the whole snapshot without flooding the AX server.
     private static let maximumConcurrentApplicationQueries = 4
 
-    static func states(
-        for processIdentifiers: [pid_t],
-        hiddenProcessIdentifiers: Set<pid_t>
-    ) async -> [pid_t: ApplicationWindowState] {
+    static func snapshot(
+        for candidates: [Candidate]
+    ) async -> Snapshot {
         let queryTask = Task.detached(priority: .userInitiated) {
-            await queryStates(
-                for: processIdentifiers,
-                hiddenProcessIdentifiers: hiddenProcessIdentifiers
-            )
+            await queryStates(for: candidates)
         }
 
         return await withTaskCancellationHandler {
@@ -94,20 +118,41 @@ enum ApplicationWindowService {
     }
 
     private static func queryStates(
-        for processIdentifiers: [pid_t],
-        hiddenProcessIdentifiers: Set<pid_t>
-    ) async -> [pid_t: ApplicationWindowState] {
-        guard !Task.isCancelled, AccessibilityPermission.isGranted else {
-            return [:]
+        for candidates: [Candidate]
+    ) async -> Snapshot {
+        guard !Task.isCancelled else {
+            return Snapshot(states: [:], plan: nil)
         }
 
         let windowListSpan = PerformanceLog.begin("ax.windowList")
-        let visibleWindowIdentifiers = visibleWindowIdentifiers()
+        let plan = windowQueryPlan()
         PerformanceLog.end(windowListSpan)
 
-        guard let visibleWindowIdentifiers else {
-            return [:]
+        guard let plan else {
+            return Snapshot(states: [:], plan: nil)
         }
+        guard AccessibilityPermission.isGranted else {
+            return Snapshot(states: [:], plan: plan)
+        }
+
+        // Preserve the budget for regular apps and visible accessory windows;
+        // probe remaining accessory owners for minimized windows afterward.
+        var primaryCandidates: [Candidate] = []
+        var secondaryCandidates: [Candidate] = []
+        for candidate in candidates {
+            switch candidate.policy.windowQueryPriority(
+                hasWindowServerWindows: plan.hasWindows(for: candidate.processIdentifier),
+                hasVisibleWindows: plan.hasVisibleWindows(for: candidate.processIdentifier)
+            ) {
+            case .primary:
+                primaryCandidates.append(candidate)
+            case .secondary:
+                secondaryCandidates.append(candidate)
+            case .skip:
+                continue
+            }
+        }
+        let queryCandidates = primaryCandidates + secondaryCandidates
 
         let spaceSpan = PerformanceLog.begin("ax.otherSpaceWindows")
         let otherSpaceWindowOwners = OtherSpaceWindowResolver
@@ -119,18 +164,13 @@ enum ApplicationWindowService {
 
         let querySpan = PerformanceLog.begin("ax.queryStates")
         let deadline = DispatchTime.now() + totalQueryBudget
-        let plan = WindowQueryPlan(
-            visibleWindowIdentifiers: visibleWindowIdentifiers
-        )
-        let queryCandidate: @Sendable (pid_t) -> WindowStateQueryResult = { processIdentifier in
+        let queryCandidate: @Sendable (Candidate) -> WindowStateQueryResult = { candidate in
             queryState(
-                for: processIdentifier,
-                isApplicationHidden: hiddenProcessIdentifiers.contains(
-                    processIdentifier
-                ),
+                for: candidate.processIdentifier,
+                isApplicationHidden: candidate.isHidden,
                 otherSpaceWindowEvidence: OtherSpaceWindowEvidence(
                     hasWindows: otherSpaceWindowOwners?.contains(
-                        processIdentifier
+                        candidate.processIdentifier
                     )
                 ),
                 plan: plan,
@@ -138,25 +178,25 @@ enum ApplicationWindowService {
             )
         }
 
-        return await withTaskGroup(
+        let states = await withTaskGroup(
             of: WindowStateQueryResult.self
         ) { group in
-            var candidates = processIdentifiers.makeIterator()
+            var candidates = queryCandidates.makeIterator()
             var dispatchedCount = 0
             let initialQueryCount = min(
                 maximumConcurrentApplicationQueries,
-                processIdentifiers.count
+                queryCandidates.count
             )
 
             for _ in 0..<initialQueryCount {
                 guard !Task.isCancelled,
-                      let processIdentifier = candidates.next() else {
+                      let candidate = candidates.next() else {
                     break
                 }
 
                 dispatchedCount += 1
                 group.addTask {
-                    queryCandidate(processIdentifier)
+                    queryCandidate(candidate)
                 }
             }
 
@@ -173,13 +213,13 @@ enum ApplicationWindowService {
                 }
 
                 guard DispatchTime.now() < deadline,
-                      let processIdentifier = candidates.next() else {
+                      let candidate = candidates.next() else {
                     continue
                 }
 
                 dispatchedCount += 1
                 group.addTask {
-                    queryCandidate(processIdentifier)
+                    queryCandidate(candidate)
                 }
             }
 
@@ -189,13 +229,14 @@ enum ApplicationWindowService {
             // not the elapsed time on its own.
             PerformanceLog.end(
                 querySpan,
-                "candidates=\(processIdentifiers.count) "
+                "candidates=\(queryCandidates.count) "
                     + "dispatched=\(dispatchedCount) "
                     + "resolved=\(states.count) "
                     + "budgetExpired=\(DispatchTime.now() >= deadline)"
             )
             return states
         }
+        return Snapshot(states: states, plan: plan)
     }
 
     private static func queryState(
@@ -249,13 +290,13 @@ enum ApplicationWindowService {
         )
     }
 
-    private static func visibleWindowIdentifiers() -> [pid_t: Set<CGWindowID>]? {
+    private static func windowQueryPlan() -> WindowQueryPlan? {
         // AX is queried for every app so minimized windows can be recognized.
         // These WindowServer identifiers remain authoritative for ordinary
         // visible windows and reject other-Space, ordered-out, and ghost AX
         // elements without hiding windows explicitly marked as minimized.
         let options: CGWindowListOption = [
-            .optionOnScreenOnly,
+            .optionAll,
             .excludeDesktopElements,
         ]
         guard let windowInfo = CGWindowListCopyWindowInfo(
@@ -265,8 +306,9 @@ enum ApplicationWindowService {
             return nil
         }
 
-        return windowInfo.reduce(into: [pid_t: Set<CGWindowID>]()) {
-            identifiers, window in
+        var visibleWindowIdentifiers: [pid_t: Set<CGWindowID>] = [:]
+        var windowOwnerProcessIdentifiers: Set<pid_t> = []
+        for window in windowInfo {
             guard
                 window[kCGWindowLayer as String] as? Int == 0,
                 let processIdentifier = window[
@@ -276,13 +318,19 @@ enum ApplicationWindowService {
                     kCGWindowNumber as String
                 ] as? CGWindowID
             else {
-                return
+                continue
             }
 
-            identifiers[pid_t(processIdentifier), default: []].insert(
-                windowIdentifier
-            )
+            let owner = pid_t(processIdentifier)
+            windowOwnerProcessIdentifiers.insert(owner)
+            if window[kCGWindowIsOnscreen as String] as? Bool == true {
+                visibleWindowIdentifiers[owner, default: []].insert(windowIdentifier)
+            }
         }
+        return WindowQueryPlan(
+            visibleWindowIdentifiers: visibleWindowIdentifiers,
+            windowOwnerProcessIdentifiers: windowOwnerProcessIdentifiers
+        )
     }
 
     private static func windows(

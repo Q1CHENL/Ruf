@@ -9,6 +9,7 @@ keyboard-first window controls.
 
 - Switch between apps and windows in a compact, recent-first matrix. Ruf
   restores minimized windows and reopens apps with no open windows.
+  Menu bar apps appear when they have visible or minimized windows.
 - Open a new window through the selected app's menu, or quit it without
   activating it first.
 - Move a focused, non-full-screen window smoothly to an adjacent display.

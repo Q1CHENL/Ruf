@@ -38,27 +38,33 @@ final class ApplicationCatalog: NSObject {
         let applications = applicationSnapshot()
         PerformanceLog.end(applicationSpan, "apps=\(applications.count)")
 
-        let hiddenProcessIdentifiers = Set(
-            applications.lazy
-                .filter(\.application.isHidden)
-                .map(\.application.processIdentifier)
-        )
-        async let windowStatesQuery = ApplicationWindowService.states(
-            for: applications.map(\.application.processIdentifier),
-            hiddenProcessIdentifiers: hiddenProcessIdentifiers
+        async let windowSnapshotQuery = ApplicationWindowService.snapshot(
+            for: applications.map {
+                ApplicationWindowService.Candidate(
+                    processIdentifier: $0.application.processIdentifier,
+                    policy: $0.discoveryPolicy,
+                    isHidden: $0.application.isHidden
+                )
+            }
         )
         async let dockBadgesQuery = DockBadgeService.badges()
-        let (windowStates, dockBadges) = await (
-            windowStatesQuery,
+        let (windowSnapshot, dockBadges) = await (
+            windowSnapshotQuery,
             dockBadgesQuery
         )
 
         var targets = applications.flatMap { item -> [SwitchTarget] in
+            guard windowSnapshot.includesApplication(
+                item.application.processIdentifier,
+                policy: item.discoveryPolicy
+            ) else {
+                return []
+            }
             let dockBadge = item.application.bundleURL.flatMap {
                 dockBadges[$0.standardizedFileURL]
             }
 
-            switch windowStates[item.application.processIdentifier] {
+            switch windowSnapshot.states[item.application.processIdentifier] {
             case let .singleWindow(window)?:
                 return [
                     SwitchTarget(
@@ -125,6 +131,7 @@ final class ApplicationCatalog: NSObject {
         return SwitchTarget(
             item: ApplicationItem(
                 application: application,
+                discoveryPolicy: .excluded,
                 bundleIdentifier: bundleIdentifier,
                 name: name,
                 icon: icon
@@ -149,8 +156,9 @@ final class ApplicationCatalog: NSObject {
         var itemsByBundleIdentifier: [String: ApplicationItem] = [:]
 
         for application in runningApplications {
+            let discoveryPolicy = ApplicationDiscoveryPolicy(application: application)
             guard
-                application.activationPolicy == .regular,
+                discoveryPolicy.isCandidate,
                 !application.isTerminated,
                 let bundleIdentifier = application.bundleIdentifier,
                 let name = application.localizedName,
@@ -161,6 +169,7 @@ final class ApplicationCatalog: NSObject {
 
             let item = ApplicationItem(
                 application: application,
+                discoveryPolicy: discoveryPolicy,
                 bundleIdentifier: bundleIdentifier,
                 name: name,
                 icon: icon
@@ -212,7 +221,7 @@ final class ApplicationCatalog: NSObject {
 
     private func recordActivation(_ application: NSRunningApplication) {
         guard
-            application.activationPolicy == .regular,
+            ApplicationDiscoveryPolicy(application: application).isCandidate,
             let bundleIdentifier = application.bundleIdentifier,
             recentApplications.identifiers.first != bundleIdentifier
         else {
