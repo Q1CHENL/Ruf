@@ -10,7 +10,7 @@ final class ApplicationDiscoveryPolicyTests: XCTestCase {
             policy.windowQueryPriority(hasWindowServerWindows: false, hasVisibleWindows: false),
             .primary
         )
-        XCTAssertTrue(policy.shouldInclude(hasVisibleWindows: false, hasSwitchableWindows: false))
+        XCTAssertTrue(policy.shouldInclude(hasSwitchableWindows: false))
     }
 
     func testMenuBarApplicationsRequireConfirmedWindows() {
@@ -25,9 +25,8 @@ final class ApplicationDiscoveryPolicyTests: XCTestCase {
             policy.windowQueryPriority(hasWindowServerWindows: true, hasVisibleWindows: false),
             .secondary
         )
-        XCTAssertFalse(policy.shouldInclude(hasVisibleWindows: false, hasSwitchableWindows: false))
-        XCTAssertTrue(policy.shouldInclude(hasVisibleWindows: true, hasSwitchableWindows: false))
-        XCTAssertTrue(policy.shouldInclude(hasVisibleWindows: false, hasSwitchableWindows: true))
+        XCTAssertFalse(policy.shouldInclude(hasSwitchableWindows: false))
+        XCTAssertTrue(policy.shouldInclude(hasSwitchableWindows: true))
     }
 
     func testVisibleMenuBarWindowsTakePriorityOverPotentialMinimizedWindows() {
@@ -43,6 +42,16 @@ final class ApplicationDiscoveryPolicyTests: XCTestCase {
         )
     }
 
+    func testVisibleAccessorySurfaceOnlyQualifiesForAWindowQuery() {
+        let policy = ApplicationDiscoveryPolicy.windowsOnly
+
+        XCTAssertEqual(
+            policy.windowQueryPriority(hasWindowServerWindows: true, hasVisibleWindows: true),
+            .primary
+        )
+        XCTAssertFalse(policy.shouldInclude(hasSwitchableWindows: false))
+    }
+
     func testExcludedApplicationsStayExcludedEvenWithWindows() {
         let policy = ApplicationDiscoveryPolicy.excluded
 
@@ -51,6 +60,6 @@ final class ApplicationDiscoveryPolicyTests: XCTestCase {
             policy.windowQueryPriority(hasWindowServerWindows: true, hasVisibleWindows: true),
             .skip
         )
-        XCTAssertFalse(policy.shouldInclude(hasVisibleWindows: true, hasSwitchableWindows: true))
+        XCTAssertFalse(policy.shouldInclude(hasSwitchableWindows: true))
     }
 }

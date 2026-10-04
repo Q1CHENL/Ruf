@@ -5,17 +5,26 @@ import XCTest
 @testable import Ruf
 
 final class ApplicationWindowSnapshotTests: XCTestCase {
-    func testVisibleAccessoryWindowSurvivesUnavailableAXRead() {
+    func testAccessoryApplicationsWithoutConfirmedAXWindowsAreExcluded() {
         let snapshot = ApplicationWindowService.Snapshot(
-            states: [:],
-            plan: WindowQueryPlan(
-                visibleWindowIdentifiers: [20: [201]],
-                windowOwnerProcessIdentifiers: [20, 30]
-            )
+            states: [30: .windowless]
+        )
+
+        XCTAssertFalse(snapshot.includesApplication(20, policy: .windowsOnly))
+        XCTAssertFalse(snapshot.includesApplication(30, policy: .windowsOnly))
+    }
+
+    func testConfirmedVisibleAccessoryWindowIsIncluded() {
+        let window = ApplicationWindow(
+            element: AXUIElementCreateApplication(getpid()),
+            title: nil,
+            isMinimized: false
+        )
+        let snapshot = ApplicationWindowService.Snapshot(
+            states: [20: .singleWindow(window)]
         )
 
         XCTAssertTrue(snapshot.includesApplication(20, policy: .windowsOnly))
-        XCTAssertFalse(snapshot.includesApplication(30, policy: .windowsOnly))
     }
 
     func testMinimizedAccessoryWindowIsIncludedWithoutVisibleWindows() {
@@ -25,11 +34,7 @@ final class ApplicationWindowSnapshotTests: XCTestCase {
             isMinimized: true
         )
         let snapshot = ApplicationWindowService.Snapshot(
-            states: [20: .windows([window]), 30: .windowless],
-            plan: WindowQueryPlan(
-                visibleWindowIdentifiers: [:],
-                windowOwnerProcessIdentifiers: [20, 30]
-            )
+            states: [20: .windows([window]), 30: .windowless]
         )
 
         XCTAssertTrue(snapshot.includesApplication(20, policy: .windowsOnly))
@@ -37,7 +42,7 @@ final class ApplicationWindowSnapshotTests: XCTestCase {
     }
 
     func testUnavailableWindowInventoryKeepsOnlyRegularApplications() {
-        let snapshot = ApplicationWindowService.Snapshot(states: [:], plan: nil)
+        let snapshot = ApplicationWindowService.Snapshot(states: [:])
 
         XCTAssertTrue(snapshot.includesApplication(20, policy: .regular))
         XCTAssertFalse(snapshot.includesApplication(30, policy: .windowsOnly))

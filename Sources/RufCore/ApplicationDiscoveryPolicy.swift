@@ -30,12 +30,14 @@ public enum ApplicationDiscoveryPolicy: Equatable, Sendable {
         }
     }
 
-    public func shouldInclude(hasVisibleWindows: Bool, hasSwitchableWindows: Bool) -> Bool {
+    public func shouldInclude(hasSwitchableWindows: Bool) -> Bool {
         switch self {
         case .regular:
             true
         case .windowsOnly:
-            hasVisibleWindows || hasSwitchableWindows
+            // WindowServer visibility alone also includes system surfaces.
+            // Require a window confirmed by the Accessibility query.
+            hasSwitchableWindows
         case .excluded:
             false
         }

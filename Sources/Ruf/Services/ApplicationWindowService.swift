@@ -12,7 +12,6 @@ enum ApplicationWindowService {
 
     struct Snapshot: Sendable {
         let states: [pid_t: ApplicationWindowState]
-        let plan: WindowQueryPlan?
 
         func includesApplication(
             _ processIdentifier: pid_t,
@@ -26,7 +25,6 @@ enum ApplicationWindowService {
                 hasSwitchableWindows = false
             }
             return policy.shouldInclude(
-                hasVisibleWindows: plan?.hasVisibleWindows(for: processIdentifier) ?? false,
                 hasSwitchableWindows: hasSwitchableWindows
             )
         }
@@ -121,7 +119,7 @@ enum ApplicationWindowService {
         for candidates: [Candidate]
     ) async -> Snapshot {
         guard !Task.isCancelled else {
-            return Snapshot(states: [:], plan: nil)
+            return Snapshot(states: [:])
         }
 
         let windowListSpan = PerformanceLog.begin("ax.windowList")
@@ -129,10 +127,10 @@ enum ApplicationWindowService {
         PerformanceLog.end(windowListSpan)
 
         guard let plan else {
-            return Snapshot(states: [:], plan: nil)
+            return Snapshot(states: [:])
         }
         guard AccessibilityPermission.isGranted else {
-            return Snapshot(states: [:], plan: plan)
+            return Snapshot(states: [:])
         }
 
         // Preserve the budget for regular apps and visible accessory windows;
@@ -236,7 +234,7 @@ enum ApplicationWindowService {
             )
             return states
         }
-        return Snapshot(states: states, plan: plan)
+        return Snapshot(states: states)
     }
 
     private static func queryState(
