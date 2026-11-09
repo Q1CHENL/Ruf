@@ -13,13 +13,18 @@ public struct SwitcherSession: Equatable, Sendable {
         GridNavigation(itemCount: itemCount)
     }
 
+    /// Starts a session whose first selection skips `currentGroup`, the
+    /// group the user is switching away from. That group can have no target,
+    /// for example when Ruf itself is frontmost; the selection then starts at
+    /// the first initial target, or the last one going backwards.
     public mutating func begin<Group: Equatable>(
         groupIdentifiers: [Group],
+        currentGroup: Group?,
         initialSelectionTargetCount: Int? = nil,
         backwards: Bool,
         showsApplicationResourceUsage: Bool = false
     ) {
-        guard let currentGroup = groupIdentifiers.first else {
+        guard !groupIdentifiers.isEmpty else {
             clear()
             return
         }

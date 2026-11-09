@@ -169,7 +169,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 return
             }
 
-            let targets = await catalog.snapshot(
+            let snapshot = await catalog.snapshot(
                 includesRufSettingsTarget: !preferences.showsMenuBarItem,
                 rufSoftwareUpdateVersion:
                     softwareUpdateAvailability.availableVersion
@@ -179,7 +179,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
 
             finishLoadingTargets(
-                targets,
+                snapshot,
                 backwards: backwards,
                 gestureID: gestureID
             )
@@ -187,7 +187,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func finishLoadingTargets(
-        _ targets: [SwitchTarget],
+        _ snapshot: ApplicationCatalog.Snapshot,
         backwards: Bool,
         gestureID: UInt64
     ) {
@@ -198,6 +198,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         snapshotTask = nil
+        let targets = snapshot.targets
 
         guard !targets.isEmpty else {
             endOpenSpan("aborted targets=0")
@@ -212,6 +213,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let beginSpan = PerformanceLog.begin("switcher.begin")
         model.begin(
             with: targets,
+            currentBundleIdentifier: snapshot.currentBundleIdentifier,
             backwards: backwards,
             showsApplicationResourceUsage:
                 preferences.showsApplicationResourceUsage
@@ -251,6 +253,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
 
+        catalog.recordRequestedActivation(of: target.item.application)
         switch target.kind {
         case .application:
             target.item.application.activate(options: [.activateAllWindows])
@@ -275,6 +278,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func openNewWindow(for target: SwitchTarget) {
+        catalog.recordRequestedActivation(of: target.item.application)
         if case .openRufSettings = target.kind {
             settingsWindowController.show()
             return

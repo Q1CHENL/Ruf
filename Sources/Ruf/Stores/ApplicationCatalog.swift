@@ -3,10 +3,21 @@ import RufCore
 
 @MainActor
 final class ApplicationCatalog: NSObject {
+    struct Snapshot {
+        let targets: [SwitchTarget]
+        /// The application the user is switching away from. It can have no
+        /// target, for example when Ruf itself is frontmost.
+        let currentBundleIdentifier: String?
+    }
+
     private static let recentApplicationsKey = "recentApplicationBundleIdentifiers"
 
     private let workspace = NSWorkspace.shared
     private var recentApplications: RecentApplicationList
+    /// An application Ruf asked to activate that macOS has not reported
+    /// active yet. Activation is asynchronous, so until then this
+    /// application, not the one still frontmost, is current.
+    private var requestedActivation: NSRunningApplication?
 
     override init() {
         recentApplications = RecentApplicationList(
@@ -29,11 +40,24 @@ final class ApplicationCatalog: NSObject {
         )
     }
 
+    /// Records `application` as the most recent one as soon as Ruf asks
+    /// macOS to activate it, so a gesture that starts before the activation
+    /// lands still switches back to the application the user just left.
+    func recordRequestedActivation(of application: NSRunningApplication) {
+        requestedActivation = application
+        recordActivation(application)
+    }
+
     func snapshot(
         includesRufSettingsTarget: Bool = false,
         rufSoftwareUpdateVersion: String? = nil
-    ) async -> [SwitchTarget] {
+    ) async -> Snapshot {
         let snapshotSpan = PerformanceLog.begin("catalog.snapshot")
+        let currentApplication = resolveCurrentApplication()
+        if let currentApplication {
+            recordActivation(currentApplication)
+        }
+
         let applicationSpan = PerformanceLog.begin("catalog.applications")
         let applications = applicationSnapshot()
         PerformanceLog.end(applicationSpan, "apps=\(applications.count)")
@@ -112,7 +136,22 @@ final class ApplicationCatalog: NSObject {
             "apps=\(applications.count) badges=\(dockBadges.count) "
                 + "targets=\(targets.count)"
         )
-        return targets
+        return Snapshot(
+            targets: targets,
+            currentBundleIdentifier: currentApplication?.bundleIdentifier
+        )
+    }
+
+    private func resolveCurrentApplication() -> NSRunningApplication? {
+        let frontmostApplication = workspace.frontmostApplication
+        if let requestedActivation,
+           requestedActivation.processIdentifier
+            != frontmostApplication?.processIdentifier {
+            return requestedActivation
+        }
+
+        requestedActivation = nil
+        return frontmostApplication
     }
 
     private func rufSettingsTarget(
@@ -144,10 +183,6 @@ final class ApplicationCatalog: NSObject {
     }
 
     private func applicationSnapshot() -> [ApplicationItem] {
-        if let frontmostApplication = workspace.frontmostApplication {
-            recordActivation(frontmostApplication)
-        }
-
         let runningSpan = PerformanceLog.begin("catalog.runningApps")
         let runningApplications = workspace.runningApplications
         PerformanceLog.end(runningSpan, "running=\(runningApplications.count)")
@@ -216,6 +251,7 @@ final class ApplicationCatalog: NSObject {
             return
         }
 
+        requestedActivation = nil
         recordActivation(application)
     }
 
