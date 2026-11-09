@@ -307,10 +307,16 @@ final class FocusedWindowMover: NSObject {
         let target: WindowMutationTarget
         if application.processIdentifier
             == ProcessInfo.processInfo.processIdentifier {
-            guard let keyWindow = NSApp.keyWindow, keyWindow.isVisible else {
+            guard var hostWindow = NSApp.keyWindow,
+                  hostWindow.isVisible else {
                 return nil
             }
-            target = .appKit(keyWindow)
+            // A sheet or child window can be key while Accessibility reports
+            // the standard window that hosts it, whose frame was read above.
+            while let parent = hostWindow.sheetParent ?? hostWindow.parent {
+                hostWindow = parent
+            }
+            target = .appKit(hostWindow)
         } else {
             target = .accessibility(window)
         }
