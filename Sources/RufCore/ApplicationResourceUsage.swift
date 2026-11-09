@@ -31,6 +31,59 @@ public struct ProcessResourceCounters: Equatable, Sendable {
     }
 }
 
+/// How one process relates to the others, as read from a single pass over
+/// the process table. Either link is nil when it could not be read.
+public struct ProcessRelationship: Equatable, Sendable {
+    public let pid: Int32
+    public let parentPID: Int32?
+    /// The process macOS holds responsible for this one: for an XPC service,
+    /// the application it was launched for rather than launchd, its parent.
+    public let responsiblePID: Int32?
+
+    public init(pid: Int32, parentPID: Int32?, responsiblePID: Int32?) {
+        self.pid = pid
+        self.parentPID = parentPID
+        self.responsiblePID = responsiblePID
+    }
+}
+
+public enum ApplicationProcessGroup {
+    /// The processes whose resources count toward the application at
+    /// `rootPID`, root first: the root, every process that names it as
+    /// responsible, and every descendant of those. Activity Monitor groups by
+    /// responsibility; descendants stay included because an application can
+    /// spawn helpers that disclaim it. Without responsibility information
+    /// this is the root's process tree.
+    public static func memberPIDs(
+        of rootPID: Int32,
+        in processes: [ProcessRelationship]
+    ) -> [Int32] {
+        var members: Set<Int32> = [rootPID]
+        var orderedMembers = [rootPID]
+        var childrenByParent: [Int32: [Int32]] = [:]
+
+        for process in processes where process.pid > 0 {
+            if let parentPID = process.parentPID {
+                childrenByParent[parentPID, default: []].append(process.pid)
+            }
+            if process.responsiblePID == rootPID,
+               members.insert(process.pid).inserted {
+                orderedMembers.append(process.pid)
+            }
+        }
+
+        var index = 0
+        while index < orderedMembers.count {
+            for childPID in childrenByParent[orderedMembers[index]] ?? []
+            where members.insert(childPID).inserted {
+                orderedMembers.append(childPID)
+            }
+            index += 1
+        }
+        return orderedMembers
+    }
+}
+
 public struct ProcessTreeResourceSnapshot: Equatable, Sendable {
     // Start of traversal, used to identify processes born between snapshots.
     public let capturedAt: UInt64

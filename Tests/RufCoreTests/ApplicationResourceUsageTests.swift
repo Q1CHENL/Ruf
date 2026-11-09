@@ -279,6 +279,65 @@ final class ApplicationResourceUsageTests: XCTestCase {
         XCTAssertNil(snapshot.physicalFootprintBytes)
     }
 
+    func testProcessGroupCountsServicesTheApplicationIsResponsibleFor() {
+        // launchd parents an application's XPC services, so only their
+        // responsible process ties them to the application.
+        let members = ApplicationProcessGroup.memberPIDs(
+            of: 10,
+            in: [
+                ProcessRelationship(pid: 1, parentPID: 0, responsiblePID: 1),
+                ProcessRelationship(pid: 10, parentPID: 1, responsiblePID: 10),
+                ProcessRelationship(pid: 20, parentPID: 1, responsiblePID: 10),
+                ProcessRelationship(pid: 21, parentPID: 20, responsiblePID: 10),
+                ProcessRelationship(pid: 30, parentPID: 1, responsiblePID: 30),
+                ProcessRelationship(pid: 31, parentPID: 30, responsiblePID: 30),
+            ]
+        )
+
+        XCTAssertEqual(members.first, 10)
+        XCTAssertEqual(Set(members), [10, 20, 21])
+        XCTAssertEqual(members.count, 3)
+    }
+
+    func testProcessGroupKeepsDescendantsThatDisclaimResponsibility() {
+        let members = ApplicationProcessGroup.memberPIDs(
+            of: 10,
+            in: [
+                ProcessRelationship(pid: 10, parentPID: 1, responsiblePID: 10),
+                ProcessRelationship(pid: 11, parentPID: 10, responsiblePID: 11),
+                ProcessRelationship(pid: 12, parentPID: 11, responsiblePID: 11),
+                ProcessRelationship(pid: 20, parentPID: 1, responsiblePID: 10),
+                ProcessRelationship(pid: 22, parentPID: 20, responsiblePID: 22),
+            ]
+        )
+
+        XCTAssertEqual(members.first, 10)
+        XCTAssertEqual(Set(members), [10, 11, 12, 20, 22])
+        XCTAssertEqual(members.count, 5)
+    }
+
+    func testProcessGroupFallsBackToTheProcessTreeWithoutResponsibility() {
+        let members = ApplicationProcessGroup.memberPIDs(
+            of: 10,
+            in: [
+                ProcessRelationship(pid: 10, parentPID: 1, responsiblePID: nil),
+                ProcessRelationship(pid: 11, parentPID: 10, responsiblePID: nil),
+                ProcessRelationship(pid: 12, parentPID: 11, responsiblePID: nil),
+                ProcessRelationship(pid: 20, parentPID: 1, responsiblePID: nil),
+                ProcessRelationship(pid: 30, parentPID: nil, responsiblePID: nil),
+            ]
+        )
+
+        XCTAssertEqual(members, [10, 11, 12])
+    }
+
+    func testProcessGroupContainsOnlyTheRootWhenItIsNotListed() {
+        XCTAssertEqual(
+            ApplicationProcessGroup.memberPIDs(of: 10, in: []),
+            [10]
+        )
+    }
+
     func testResourceUsageFormattingMatchesTheSwitcherLine() {
         let runningDuration = 4 * 86_400 + 5 * 3_600
 
