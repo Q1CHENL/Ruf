@@ -192,6 +192,82 @@ final class WindowMovementSessionTests: XCTestCase {
         XCTAssertNotNil(session.animation)
     }
 
+    func testRetargetingWritesTheSizeAnEarlierPlacementMayStillChange() throws {
+        let wide = display(x: 0)
+        let small = DisplayGeometry(
+            frame: CGRect(x: 1_000, y: 0, width: 500, height: 400),
+            visibleFrame: CGRect(x: 1_000, y: 0, width: 500, height: 400)
+        )
+        let farWide = display(x: 1_500)
+        let displays = [wide, small, farWide]
+        let fullScreenFrame = wide.visibleFrame
+        var session = Session()
+
+        _ = move(
+            &session,
+            .right,
+            reducesMotion: true,
+            from: fullScreenFrame,
+            displays: displays
+        )
+        let first = try XCTUnwrap(session.animation)
+        XCTAssertEqual(first.destinationFrame, small.visibleFrame)
+
+        // The first placement is still resizing the window, so the size read
+        // back is the old one, which happens to match the next destination.
+        let effects = move(
+            &session,
+            .right,
+            reducesMotion: true,
+            from: fullScreenFrame,
+            displays: displays,
+            at: 0.01
+        )
+        let second = try XCTUnwrap(session.animation)
+        XCTAssertEqual(second.destinationFrame, farWide.visibleFrame)
+        XCTAssertEqual(
+            effects,
+            [
+                .discardPendingWrites(animationIdentifier: first.identifier),
+                .write(
+                    WindowMovementWrite(
+                        window: "editor",
+                        animationIdentifier: second.identifier,
+                        purpose: .finalPlacement,
+                        frame: farWide.visibleFrame,
+                        mutations: [
+                            .position(farWide.visibleFrame.origin),
+                            .size(farWide.visibleFrame.size),
+                            .position(farWide.visibleFrame.origin),
+                        ]
+                    )
+                ),
+            ]
+        )
+    }
+
+    func testRetargetingAWindowThatCannotResizeKeepsItsSize() throws {
+        var session = Session()
+        _ = move(&session, .right, from: window)
+        let first = try XCTUnwrap(session.animation)
+
+        let effects = move(
+            &session,
+            .left,
+            from: window,
+            at: 0.01,
+            canResize: false
+        )
+
+        XCTAssertEqual(
+            effects,
+            [
+                .discardPendingWrites(animationIdentifier: first.identifier),
+                finalPlacement(try XCTUnwrap(session.animation), window),
+            ]
+        )
+    }
+
     func testRetargetingPlansFromTheDestinationInFlight() throws {
         var session = Session()
         _ = move(&session, .right, from: window)
@@ -273,7 +349,8 @@ final class WindowMovementSessionTests: XCTestCase {
                 .discardPendingWrites(animationIdentifier: first.identifier),
                 finalPlacement(
                     second,
-                    CGRect(x: 2_100, y: 100, width: 500, height: 400)
+                    CGRect(x: 2_100, y: 100, width: 500, height: 400),
+                    resizing: true
                 ),
             ]
         )
@@ -310,7 +387,7 @@ final class WindowMovementSessionTests: XCTestCase {
             effects,
             [
                 .discardPendingWrites(animationIdentifier: first.identifier),
-                finalPlacement(second, window),
+                finalPlacement(second, window, resizing: true),
             ]
         )
         XCTAssertNil(session.animatingDisplay)
@@ -497,7 +574,8 @@ final class WindowMovementSessionTests: XCTestCase {
 
     private func finalPlacement(
         _ animation: Session.Animation,
-        _ frame: CGRect
+        _ frame: CGRect,
+        resizing: Bool = false
     ) -> Effect {
         .write(
             WindowMovementWrite(
@@ -505,7 +583,13 @@ final class WindowMovementSessionTests: XCTestCase {
                 animationIdentifier: animation.identifier,
                 purpose: .finalPlacement,
                 frame: frame,
-                mutations: [.position(frame.origin)]
+                mutations: resizing
+                    ? [
+                        .position(frame.origin),
+                        .size(frame.size),
+                        .position(frame.origin),
+                    ]
+                    : [.position(frame.origin)]
             )
         )
     }

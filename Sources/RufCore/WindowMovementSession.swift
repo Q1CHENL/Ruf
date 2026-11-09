@@ -82,7 +82,7 @@ public struct WindowMovementSession<Window: Equatable> {
     }
 
     /// Moves `window`, observed at `frame`, to the neighbouring display.
-    /// `canResize` is consulted only when the move must change the size.
+    /// `canResize` is consulted only when the move may change the size.
     public mutating func move(
         _ direction: WindowMoveDirection,
         style: WindowMovementStyle,
@@ -120,10 +120,14 @@ public struct WindowMovementSession<Window: Equatable> {
         }
 
         let destinationFrame = plan.destinationFrame
-        let resizes = destinationFrame.size != observedFrame.size
-        guard !resizes || canResize() else {
+        let mustResize = destinationFrame.size != observedFrame.size
+        guard !mustResize || canResize() else {
             return effects
         }
+        // While retargeting, an earlier placement of this window may still be
+        // resizing it, so the observed size cannot be trusted: write the size
+        // whenever the window allows it.
+        let resizes = mustResize || retargeted != nil && canResize()
 
         // Ghost continues from the preview already on screen; otherwise the
         // animation starts where the real window is.
