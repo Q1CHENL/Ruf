@@ -368,7 +368,11 @@ enum ApplicationWindowService {
                 continue
             }
 
-            if AXElementReader.containsTransientError(in: windowValues) {
+            // The title only labels the cell, so only the attributes that
+            // classify the window make it unread.
+            if AXElementReader.containsTransientError(
+                in: Array(windowValues.prefix(2))
+            ) {
                 hasUnreadWindows = true
             }
 

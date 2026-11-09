@@ -97,6 +97,80 @@ final class ApplicationWindowResolutionTests: XCTestCase {
         )
     }
 
+    // Without `_AXUIElementGetWindow` no visible window can be placed. The
+    // minimized one alone would replace the app tile, and choosing it would
+    // restore that window instead of showing the visible ones.
+    func testUnidentifiedVisibleWindowsKeepTheApplicationTile() {
+        XCTAssertEqual(
+            resolve(
+                [
+                    window("A", visibility: .unknown),
+                    window("B", visibility: .unknown),
+                    window("M", isMinimized: true, visibility: .unknown),
+                ],
+                hasVisibleWindows: true
+            ),
+            .application
+        )
+        XCTAssertEqual(
+            resolve([window("A", visibility: .unknown)]),
+            .application
+        )
+    }
+
+    func testConfirmedVisibleWindowsOutweighUnidentifiedOnes() {
+        XCTAssertEqual(
+            resolve(
+                [
+                    window("A"),
+                    window("B", visibility: .unknown),
+                    window("M", isMinimized: true),
+                ],
+                hasVisibleWindows: true
+            ),
+            .windows(["A", "M"])
+        )
+        XCTAssertEqual(
+            resolve(
+                [window("A"), window("B", visibility: .unknown)],
+                hasVisibleWindows: true
+            ),
+            .singleWindow("A")
+        )
+    }
+
+    func testUnreadWindowsKeepTheApplicationTileBesideMinimizedOnes() {
+        XCTAssertEqual(
+            resolve(
+                [window("M", isMinimized: true)],
+                hasUnreadWindows: true
+            ),
+            .application
+        )
+    }
+
+    // Hiding an application orders its windows out, so they look exactly like
+    // ghosts but are the windows the user will get back.
+    func testHiddenWindowsKeepTheApplicationTile() {
+        let windows = [
+            window("H", visibility: .offScreen),
+            window("M", isMinimized: true),
+        ]
+
+        XCTAssertEqual(
+            resolve(windows, isApplicationHidden: true),
+            .application
+        )
+        XCTAssertEqual(resolve(windows), .windows(["M"]))
+        XCTAssertEqual(
+            resolve(
+                [window("M", isMinimized: true)],
+                isApplicationHidden: true
+            ),
+            .windows(["M"])
+        )
+    }
+
     func testOffersReopeningOnlyWithoutAnyEvidenceOfWindows() {
         XCTAssertEqual(resolve([]), .windowless)
         XCTAssertEqual(resolve([], hasVisibleWindows: true), .application)
