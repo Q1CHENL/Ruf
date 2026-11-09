@@ -80,7 +80,6 @@ final class FocusedWindowMover: NSObject {
     nonisolated private static let placementMessagingTimeout: Float = 0.05
     private static let fullScreenAttribute = "AXFullScreen"
 
-    private let planner = WindowMovementPlanner()
     private let outlineController = WindowMovementOutlineController()
     private let windowWriter = DispatchQueue(
         label: "com.qichen.ruf.window-writer",
@@ -147,7 +146,7 @@ final class FocusedWindowMover: NSObject {
         let planningFrame = retargeting?.animation.destinationFrame
             ?? projection?.destinationFrame
             ?? window.frame
-        guard let plan = planner.plan(
+        guard let plan = WindowMovementPlanner.plan(
             windowFrame: planningFrame,
             displays: screens.map(\.geometry),
             direction: direction,
@@ -655,42 +654,16 @@ final class FocusedWindowMover: NSObject {
     }
 
     private func screenSnapshots() -> [ScreenSnapshot] {
-        let primaryDisplayHeight = CGDisplayBounds(CGMainDisplayID()).height
-
-        return NSScreen.screens.map { screen in
+        NSScreen.screens.map { screen in
             ScreenSnapshot(
                 screen: screen,
-                geometry: DisplayGeometry(
-                    frame: verticallyFlippedRect(
-                        screen.frame,
-                        primaryDisplayHeight: primaryDisplayHeight
-                    ),
-                    visibleFrame: verticallyFlippedRect(
-                        screen.visibleFrame,
-                        primaryDisplayHeight: primaryDisplayHeight
-                    )
-                )
+                geometry: GlobalScreenCoordinates.displayGeometry(of: screen)
             )
         }
     }
 
     private func appKitFrame(from accessibilityFrame: CGRect) -> CGRect {
-        verticallyFlippedRect(
-            accessibilityFrame,
-            primaryDisplayHeight: CGDisplayBounds(CGMainDisplayID()).height
-        )
-    }
-
-    private func verticallyFlippedRect(
-        _ rect: CGRect,
-        primaryDisplayHeight: CGFloat
-    ) -> CGRect {
-        CGRect(
-            x: rect.minX,
-            y: primaryDisplayHeight - rect.maxY,
-            width: rect.width,
-            height: rect.height
-        )
+        GlobalScreenCoordinates.flipped(accessibilityFrame)
     }
 
     private func isPositionSettable(of window: AXUIElement) -> Bool {

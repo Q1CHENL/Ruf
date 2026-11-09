@@ -2,8 +2,6 @@ import XCTest
 @testable import RufCore
 
 final class WindowMovementPlannerTests: XCTestCase {
-    private let planner = WindowMovementPlanner()
-
     func testSelectsTheSpatialNeighborInTheRequestedDirection() throws {
         let primary = display(x: 0, y: 0, width: 1_920, height: 1_080)
         let builtIn = display(x: 408, y: 1_080, width: 1_512, height: 982)
@@ -13,7 +11,7 @@ final class WindowMovementPlannerTests: XCTestCase {
 
         XCTAssertEqual(
             try XCTUnwrap(
-                planner.plan(
+                WindowMovementPlanner.plan(
                     windowFrame: window,
                     displays: displays,
                     direction: .right
@@ -23,7 +21,7 @@ final class WindowMovementPlannerTests: XCTestCase {
         )
         XCTAssertEqual(
             try XCTUnwrap(
-                planner.plan(
+                WindowMovementPlanner.plan(
                     windowFrame: window,
                     displays: displays,
                     direction: .down
@@ -32,14 +30,14 @@ final class WindowMovementPlannerTests: XCTestCase {
             builtIn
         )
         XCTAssertNil(
-            planner.plan(
+            WindowMovementPlanner.plan(
                 windowFrame: window,
                 displays: displays,
                 direction: .left
             )
         )
         XCTAssertNil(
-            planner.plan(
+            WindowMovementPlanner.plan(
                 windowFrame: window,
                 displays: displays,
                 direction: .up
@@ -56,7 +54,7 @@ final class WindowMovementPlannerTests: XCTestCase {
 
         XCTAssertEqual(
             try XCTUnwrap(
-                planner.plan(
+                WindowMovementPlanner.plan(
                     windowFrame: window,
                     displays: displays,
                     direction: .up
@@ -66,7 +64,7 @@ final class WindowMovementPlannerTests: XCTestCase {
         )
         XCTAssertEqual(
             try XCTUnwrap(
-                planner.plan(
+                WindowMovementPlanner.plan(
                     windowFrame: window,
                     displays: displays,
                     direction: .right
@@ -146,7 +144,7 @@ final class WindowMovementPlannerTests: XCTestCase {
         let window = CGRect(x: 425, y: 365, width: 200, height: 100)
 
         let plan = try XCTUnwrap(
-            planner.plan(
+            WindowMovementPlanner.plan(
                 windowFrame: window,
                 displays: [source, destination],
                 direction: .right
@@ -165,7 +163,7 @@ final class WindowMovementPlannerTests: XCTestCase {
         let window = CGRect(x: 100, y: 300, width: 700, height: 200)
 
         let plan = try XCTUnwrap(
-            planner.plan(
+            WindowMovementPlanner.plan(
                 windowFrame: window,
                 displays: [source, destination],
                 direction: .right
@@ -189,7 +187,7 @@ final class WindowMovementPlannerTests: XCTestCase {
         )
 
         let plan = try XCTUnwrap(
-            planner.plan(
+            WindowMovementPlanner.plan(
                 windowFrame: source.visibleFrame,
                 displays: [source, destination],
                 direction: .right
@@ -205,7 +203,7 @@ final class WindowMovementPlannerTests: XCTestCase {
         let window = CGRect(x: 0, y: 100, width: 500, height: 200)
 
         let plan = try XCTUnwrap(
-            planner.plan(
+            WindowMovementPlanner.plan(
                 windowFrame: window,
                 displays: [source, destination],
                 direction: .right
@@ -225,7 +223,7 @@ final class WindowMovementPlannerTests: XCTestCase {
         let window = CGRect(x: 300, y: 250, width: 400, height: 300)
 
         let down = try XCTUnwrap(
-            planner.plan(
+            WindowMovementPlanner.plan(
                 windowFrame: window,
                 displays: displays,
                 direction: .down
@@ -238,7 +236,7 @@ final class WindowMovementPlannerTests: XCTestCase {
         )
 
         let up = try XCTUnwrap(
-            planner.plan(
+            WindowMovementPlanner.plan(
                 windowFrame: down.destinationFrame,
                 displays: displays,
                 direction: .up
@@ -253,7 +251,7 @@ final class WindowMovementPlannerTests: XCTestCase {
         let bottom = display(x: 200, y: 800, width: 500, height: 400)
 
         let plan = try XCTUnwrap(
-            planner.plan(
+            WindowMovementPlanner.plan(
                 windowFrame: CGRect(x: 300, y: 100, width: 400, height: 600),
                 displays: [top, bottom],
                 direction: .down
@@ -271,7 +269,7 @@ final class WindowMovementPlannerTests: XCTestCase {
         let destination = display(x: 500, y: 0, width: 1_000, height: 800)
 
         let withinTolerance = try XCTUnwrap(
-            planner.plan(
+            WindowMovementPlanner.plan(
                 windowFrame: CGRect(x: 2, y: 100, width: 496, height: 200),
                 displays: [source, destination],
                 direction: .right
@@ -283,7 +281,7 @@ final class WindowMovementPlannerTests: XCTestCase {
         )
 
         let beyondTolerance = try XCTUnwrap(
-            planner.plan(
+            WindowMovementPlanner.plan(
                 windowFrame: CGRect(x: 3, y: 100, width: 494, height: 200),
                 displays: [source, destination],
                 direction: .right
@@ -307,7 +305,7 @@ final class WindowMovementPlannerTests: XCTestCase {
         )
 
         XCTAssertNil(
-            planner.plan(
+            WindowMovementPlanner.plan(
                 windowFrame: futureMiddleFrame,
                 displays: [left, middle, right],
                 direction: .right
@@ -315,7 +313,7 @@ final class WindowMovementPlannerTests: XCTestCase {
         )
 
         let plan = try XCTUnwrap(
-            planner.plan(
+            WindowMovementPlanner.plan(
                 windowFrame: futureMiddleFrame,
                 displays: [left, middle, right],
                 direction: .right,
@@ -335,7 +333,7 @@ final class WindowMovementPlannerTests: XCTestCase {
         let right = display(x: 1_000, y: 0, width: 1_600, height: 1_000)
 
         XCTAssertEqual(
-            planner.sourceDisplay(
+            WindowMovementPlanner.sourceDisplay(
                 for: CGRect(x: 900, y: 100, width: 400, height: 300),
                 displays: [left, right]
             ),
@@ -348,7 +346,7 @@ final class WindowMovementPlannerTests: XCTestCase {
         let right = display(x: 1_000, y: 0, width: 1_600, height: 1_000)
 
         XCTAssertEqual(
-            planner.sourceDisplay(
+            WindowMovementPlanner.sourceDisplay(
                 for: CGRect(x: -500, y: 200, width: 300, height: 300),
                 displays: [right, left]
             ),
@@ -455,7 +453,7 @@ final class WindowMovementPlannerTests: XCTestCase {
         _ direction: WindowMoveDirection,
         _ displays: [DisplayGeometry]
     ) -> DisplayGeometry? {
-        planner.plan(
+        WindowMovementPlanner.plan(
             windowFrame: CGRect(
                 x: source.visibleFrame.midX - 100,
                 y: source.visibleFrame.midY - 100,

@@ -2,8 +2,6 @@ import XCTest
 @testable import RufCore
 
 final class WindowMovementProjectionTests: XCTestCase {
-    private let planner = WindowMovementPlanner()
-
     func testRapidMovesPlanFromTheQueuedDestinationUntilItsWriteCompletes() throws {
         let left = display(x: 0)
         let middle = display(x: 1_000)
@@ -17,7 +15,7 @@ final class WindowMovementProjectionTests: XCTestCase {
         )
         let queuedSource = try XCTUnwrap(projections.current)
         let secondPlan = try XCTUnwrap(
-            planner.plan(
+            WindowMovementPlanner.plan(
                 windowFrame: queuedSource.destinationFrame,
                 displays: displays,
                 direction: .right,

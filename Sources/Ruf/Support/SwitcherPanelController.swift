@@ -174,27 +174,15 @@ final class SwitcherPanelController {
            let windowFrame = WindowServerDescriptionReader.frontmostWindowFrame(
                ownedBy: application.processIdentifier
            ) {
-            // WindowServer frames have a top-left origin on the primary display.
-            let primaryDisplayHeight = CGDisplayBounds(CGMainDisplayID()).height
-            let appKitWindowFrame = CGRect(
-                x: windowFrame.minX,
-                y: primaryDisplayHeight - windowFrame.maxY,
-                width: windowFrame.width,
-                height: windowFrame.height
+            // WindowServer frames share the displays' top-left-origin space.
+            let displays = screens.map(
+                GlobalScreenCoordinates.displayGeometry(of:)
             )
-            let display = WindowMovementPlanner().sourceDisplay(
-                for: appKitWindowFrame,
-                displays: screens.map {
-                    DisplayGeometry(
-                        frame: $0.frame,
-                        visibleFrame: $0.visibleFrame
-                    )
-                }
-            )
-            if let screen = screens.first(where: {
-                $0.frame == display?.frame
-            }) {
-                return screen
+            if let display = WindowMovementPlanner.sourceDisplay(
+                for: windowFrame,
+                displays: displays
+            ), let index = displays.firstIndex(of: display) {
+                return screens[index]
             }
         }
 

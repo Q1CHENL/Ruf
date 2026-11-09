@@ -208,15 +208,13 @@ public struct WindowMovementMutationPlan: Sendable {
     }
 }
 
-public struct WindowMovementPlanner: Sendable {
+public enum WindowMovementPlanner {
     private static let fullSpanTolerance: CGFloat = 2
     // Display arrangements never overlap, so neighbours share an edge
     // exactly; the tolerance only absorbs rounding.
     private static let edgeTolerance: CGFloat = 1
 
-    public init() {}
-
-    public func plan(
+    public static func plan(
         windowFrame: CGRect,
         displays: [DisplayGeometry],
         direction: WindowMoveDirection,
@@ -301,7 +299,7 @@ public struct WindowMovementPlanner: Sendable {
 
     /// The display showing most of `windowFrame`, or the nearest display when
     /// the frame overlaps none of them.
-    public func sourceDisplay(
+    public static func sourceDisplay(
         for windowFrame: CGRect,
         displays: [DisplayGeometry]
     ) -> DisplayGeometry? {
@@ -338,7 +336,7 @@ public struct WindowMovementPlanner: Sendable {
     /// Whether `candidate` lies entirely beyond the source's edge in
     /// `direction`, so a display above or below never counts as a horizontal
     /// neighbour (and vice versa) however its centre is offset.
-    private func isInDirection(
+    private static func isInDirection(
         _ candidate: DisplayGeometry,
         from source: DisplayGeometry,
         direction: WindowMoveDirection
@@ -355,7 +353,7 @@ public struct WindowMovementPlanner: Sendable {
         }
     }
 
-    private func isBetterDestination(
+    private static func isBetterDestination(
         _ candidate: DisplayGeometry,
         than current: DisplayGeometry,
         from source: DisplayGeometry,
@@ -381,7 +379,7 @@ public struct WindowMovementPlanner: Sendable {
         return geometryOrder(candidate, current)
     }
 
-    private func destinationScore(
+    private static func destinationScore(
         _ candidate: DisplayGeometry,
         from source: DisplayGeometry,
         direction: WindowMoveDirection
@@ -446,7 +444,7 @@ public struct WindowMovementPlanner: Sendable {
         }
     }
 
-    private func mappedOrigin(
+    private static func mappedOrigin(
         windowOrigin: CGFloat,
         sourceWindowLength: CGFloat,
         destinationWindowLength: CGFloat,
@@ -470,7 +468,7 @@ public struct WindowMovementPlanner: Sendable {
         return destinationRange.lowerBound + progress * destinationTravel
     }
 
-    private func mappedLength(
+    private static func mappedLength(
         windowRange: ClosedRange<CGFloat>,
         sourceRange: ClosedRange<CGFloat>,
         destinationRange: ClosedRange<CGFloat>
@@ -485,7 +483,7 @@ public struct WindowMovementPlanner: Sendable {
         return min(windowLength, destinationLength)
     }
 
-    private func fills(
+    private static func fills(
         _ windowRange: ClosedRange<CGFloat>,
         _ displayRange: ClosedRange<CGFloat>
     ) -> Bool {
@@ -502,7 +500,7 @@ public struct WindowMovementPlanner: Sendable {
     /// 0 when the intervals share more than an edge, 1 when they only touch
     /// or are apart: a display meeting the source at a corner is a weaker
     /// neighbour than one sharing part of the source's edge.
-    private func misalignment(
+    private static func misalignment(
         _ lhs: ClosedRange<CGFloat>,
         _ rhs: ClosedRange<CGFloat>
     ) -> CGFloat {
@@ -511,7 +509,7 @@ public struct WindowMovementPlanner: Sendable {
         return overlap > Self.edgeTolerance ? 0 : 1
     }
 
-    private func intervalGap(
+    private static func intervalGap(
         _ lhs: ClosedRange<CGFloat>,
         _ rhs: ClosedRange<CGFloat>
     ) -> CGFloat {
@@ -524,7 +522,7 @@ public struct WindowMovementPlanner: Sendable {
         return 0
     }
 
-    private func intersectionArea(_ lhs: CGRect, _ rhs: CGRect) -> CGFloat {
+    private static func intersectionArea(_ lhs: CGRect, _ rhs: CGRect) -> CGFloat {
         let intersection = lhs.intersection(rhs)
         guard !intersection.isNull else {
             return 0
@@ -533,7 +531,7 @@ public struct WindowMovementPlanner: Sendable {
         return max(0, intersection.width) * max(0, intersection.height)
     }
 
-    private func squaredDistance(from point: CGPoint, to rect: CGRect) -> CGFloat {
+    private static func squaredDistance(from point: CGPoint, to rect: CGRect) -> CGFloat {
         let horizontalDistance = max(
             0,
             max(rect.minX - point.x, point.x - rect.maxX)
@@ -546,7 +544,7 @@ public struct WindowMovementPlanner: Sendable {
             + verticalDistance * verticalDistance
     }
 
-    private func geometryOrder(
+    private static func geometryOrder(
         _ lhs: DisplayGeometry,
         _ rhs: DisplayGeometry
     ) -> Bool {
