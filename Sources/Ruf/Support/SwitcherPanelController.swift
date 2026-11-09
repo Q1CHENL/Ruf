@@ -1,4 +1,5 @@
 import AppKit
+import RufCore
 import SwiftUI
 
 @MainActor
@@ -96,10 +97,7 @@ final class SwitcherPanelController {
         PerformanceLog.end(resizeSpan, "items=\(itemCount)")
 
         let originSpan = PerformanceLog.begin("panel.origin")
-        let mouseLocation = NSEvent.mouseLocation
-        let screen = NSScreen.screens.first { $0.frame.contains(mouseLocation) }
-            ?? NSScreen.main
-            ?? NSScreen.screens.first
+        let screen = presentationScreen(for: previouslyActiveApplication)
 
         if let visibleFrame = screen?.visibleFrame {
             panel.setFrameOrigin(
@@ -164,6 +162,46 @@ final class SwitcherPanelController {
         }
 
         return applicationResourceUsageCallout.show(placement, parent: panel)
+    }
+
+    /// The screen showing the focused application's frontmost window, or the
+    /// screen under the pointer when that application shows no window.
+    private func presentationScreen(
+        for application: NSRunningApplication?
+    ) -> NSScreen? {
+        let screens = NSScreen.screens
+        if let application,
+           let windowFrame = WindowServerDescriptionReader.frontmostWindowFrame(
+               ownedBy: application.processIdentifier
+           ) {
+            // WindowServer frames have a top-left origin on the primary display.
+            let primaryDisplayHeight = CGDisplayBounds(CGMainDisplayID()).height
+            let appKitWindowFrame = CGRect(
+                x: windowFrame.minX,
+                y: primaryDisplayHeight - windowFrame.maxY,
+                width: windowFrame.width,
+                height: windowFrame.height
+            )
+            let display = WindowMovementPlanner().sourceDisplay(
+                for: appKitWindowFrame,
+                displays: screens.map {
+                    DisplayGeometry(
+                        frame: $0.frame,
+                        visibleFrame: $0.visibleFrame
+                    )
+                }
+            )
+            if let screen = screens.first(where: {
+                $0.frame == display?.frame
+            }) {
+                return screen
+            }
+        }
+
+        let mouseLocation = NSEvent.mouseLocation
+        return screens.first { $0.frame.contains(mouseLocation) }
+            ?? NSScreen.main
+            ?? screens.first
     }
 
     @discardableResult

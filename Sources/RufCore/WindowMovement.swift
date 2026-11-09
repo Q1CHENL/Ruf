@@ -296,7 +296,9 @@ public struct WindowMovementPlanner: Sendable {
         )
     }
 
-    private func sourceDisplay(
+    /// The display showing most of `windowFrame`, or the nearest display when
+    /// the frame overlaps none of them.
+    public func sourceDisplay(
         for windowFrame: CGRect,
         displays: [DisplayGeometry]
     ) -> DisplayGeometry? {

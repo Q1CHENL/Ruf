@@ -195,6 +195,32 @@ final class WindowMovementPlannerTests: XCTestCase {
         )
     }
 
+    func testSourceDisplayShowsMostOfAStraddlingWindow() {
+        let left = display(x: 0, y: 0, width: 1_000, height: 800)
+        let right = display(x: 1_000, y: 0, width: 1_600, height: 1_000)
+
+        XCTAssertEqual(
+            planner.sourceDisplay(
+                for: CGRect(x: 900, y: 100, width: 400, height: 300),
+                displays: [left, right]
+            ),
+            right
+        )
+    }
+
+    func testSourceDisplayIsTheNearestDisplayForAnOffscreenWindow() {
+        let left = display(x: 0, y: 0, width: 1_000, height: 800)
+        let right = display(x: 1_000, y: 0, width: 1_600, height: 1_000)
+
+        XCTAssertEqual(
+            planner.sourceDisplay(
+                for: CGRect(x: -500, y: 200, width: 300, height: 300),
+                displays: [right, left]
+            ),
+            left
+        )
+    }
+
     func testExposesResizeWhenTheDestinationSizeChanges() {
         let start = CGRect(x: 0, y: 100, width: 1_000, height: 800)
         let destination = CGRect(x: 1_000, y: 300, width: 500, height: 400)
