@@ -1,6 +1,7 @@
 import AppKit
 import CoreGraphics
 import Darwin
+import RufCore
 
 // Accessibility reports an empty window list for every application whose
 // windows live on another Space, and the on-screen WindowServer list only ever
@@ -87,17 +88,10 @@ enum OtherSpaceWindowResolver {
 
         let connection = entrypoints.mainConnectionID()
         guard let displays = entrypoints.copyManagedDisplaySpaces(connection)?
-            .takeRetainedValue() as? [NSDictionary] else {
-            return nil
-        }
-
-        // A display layout that yields no Space identifiers at all means the
-        // keys these dictionaries are read with have moved, not that the Mac
-        // has no Spaces. Reporting that as "no other-Space windows" would
-        // silently restore the bug this exists to fix, so it degrades to the
-        // unavailable answer instead. Having Spaces but none of them other
-        // than the current one is the ordinary single-Space Mac.
-        guard let spaceIdentifiers = otherSpaceIdentifiers(in: displays) else {
+            .takeRetainedValue() as? [[String: Any]],
+              let spaceIdentifiers = ManagedDisplaySpaces.otherSpaceIdentifiers(
+                  in: displays
+              ) else {
             return nil
         }
         guard !spaceIdentifiers.isEmpty else {
@@ -125,32 +119,6 @@ enum OtherSpaceWindowResolver {
         }
 
         return owners(of: windowIdentifiers)
-    }
-
-    private static func otherSpaceIdentifiers(
-        in displays: [NSDictionary]
-    ) -> [UInt64]? {
-        var currentIdentifiers: Set<UInt64> = []
-        var allIdentifiers: [UInt64] = []
-
-        for display in displays {
-            if let current = display["Current Space"] as? NSDictionary,
-               let identifier = current["id64"] as? UInt64 {
-                currentIdentifiers.insert(identifier)
-            }
-
-            for space in display["Spaces"] as? [NSDictionary] ?? [] {
-                if let identifier = space["id64"] as? UInt64 {
-                    allIdentifiers.append(identifier)
-                }
-            }
-        }
-
-        guard !allIdentifiers.isEmpty else {
-            return nil
-        }
-
-        return allIdentifiers.filter { !currentIdentifiers.contains($0) }
     }
 
     private static func owners(
