@@ -33,10 +33,18 @@ jobs:
               diff_base="$PR_BASE_SHA"
               ;;
             push)
-              if [[ "$PUSH_BASE_SHA" =~ ^0+$ ]]; then
-                diff_base="$(git merge-base HEAD "origin/$DEFAULT_BRANCH")"
-              else
+              if [[ ! "$PUSH_BASE_SHA" =~ ^0+$ ]] \
+                && git cat-file -e "$PUSH_BASE_SHA^{commit}" 2>/dev/null; then
                 diff_base="$PUSH_BASE_SHA"
+              else
+                # A new branch has no previous head, and a force-push's
+                # previous head is no longer fetched. Check what the push adds
+                # to the default branch, or its last commit when it is the
+                # default branch.
+                diff_base="$(git merge-base HEAD "origin/$DEFAULT_BRANCH")"
+                if [[ "$diff_base" == "$(git rev-parse HEAD)" ]]; then
+                  diff_base="HEAD^"
+                fi
               fi
               ;;
             workflow_dispatch)
