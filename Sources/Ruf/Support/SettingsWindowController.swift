@@ -81,7 +81,10 @@ final class SettingsWindowController {
 
         let sourceApplication = NSWorkspace.shared.frontmostApplication
         if !window.isVisible {
-            window.center()
+            place(
+                window,
+                on: PresentationScreen.resolve(for: sourceApplication)
+            )
         }
 
         window.orderFrontRegardless()
@@ -101,5 +104,25 @@ final class SettingsWindowController {
 
             window.makeKeyAndOrderFront(nil)
         }
+    }
+
+    /// Centres `window` horizontally on `screen` and, like
+    /// `NSWindow.center()`, which only ever uses the main screen, leaves a
+    /// quarter of the spare height above it.
+    private func place(_ window: NSWindow, on screen: NSScreen?) {
+        guard let visibleFrame = screen?.visibleFrame else {
+            window.center()
+            return
+        }
+
+        let size = window.frame.size
+        let spareHeight = max(0, visibleFrame.height - size.height)
+        window.setFrameOrigin(
+            CGPoint(
+                x: (visibleFrame.midX - size.width / 2).rounded(.down),
+                y: (visibleFrame.maxY - size.height - spareHeight / 4)
+                    .rounded(.down)
+            )
+        )
     }
 }
