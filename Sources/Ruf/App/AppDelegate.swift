@@ -67,6 +67,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private weak var aboutPanel: NSPanel?
     private var permissionMonitor: Timer?
     private var remainingPermissionChecks = 0
+    private var appliedAccessibilityRequirement = false
     private var snapshotTask: Task<Void, Never>?
     private var openSpan: PerformanceLog.Span?
     private var loadingSession = SwitcherLoadingSession()
@@ -514,7 +515,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let accessibilityGranted = AccessibilityPermission.isGranted
         refreshKeyboardCaptureState(accessibilityGranted: accessibilityGranted)
 
-        if preferences.requiresAccessibilityPermission,
+        // Prompt at launch and when a change first makes Accessibility
+        // necessary, not again for every unrelated preference change while
+        // permission is still missing.
+        let requiresAccessibilityPermission =
+            preferences.requiresAccessibilityPermission
+        defer {
+            appliedAccessibilityRequirement = requiresAccessibilityPermission
+        }
+        if requiresAccessibilityPermission,
+           !appliedAccessibilityRequirement,
            !accessibilityGranted {
             requestAccessibility(openSystemSettings: false)
         }
