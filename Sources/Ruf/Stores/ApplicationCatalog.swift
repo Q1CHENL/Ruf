@@ -7,9 +7,11 @@ final class ApplicationCatalog: NSObject {
         let targets: [SwitchTarget]
         /// The application the user is switching away from. It can have no
         /// target, for example when Ruf itself is frontmost.
-        let currentBundleIdentifier: String?
+        let currentApplicationIdentifier: String?
     }
 
+    // The key predates executable paths among the identifiers. It stays so
+    // the recency order saved by earlier versions keeps loading.
     private static let recentApplicationsKey = "recentApplicationBundleIdentifiers"
 
     private let workspace = NSWorkspace.shared
@@ -121,7 +123,7 @@ final class ApplicationCatalog: NSObject {
         )
         return Snapshot(
             targets: targets,
-            currentBundleIdentifier: currentApplication?.bundleIdentifier
+            currentApplicationIdentifier: currentApplication?.applicationIdentifier
         )
     }
 
@@ -143,9 +145,8 @@ final class ApplicationCatalog: NSObject {
         let application = NSRunningApplication.current
         guard
             !application.isTerminated,
-            let bundleIdentifier = application.bundleIdentifier,
-            let name = application.localizedName,
-            let icon = ApplicationIconResolver.icon(for: application)
+            let applicationIdentifier = application.applicationIdentifier,
+            let name = application.localizedName
         else {
             return nil
         }
@@ -153,9 +154,9 @@ final class ApplicationCatalog: NSObject {
         return SwitchTarget(
             item: ApplicationItem(
                 application: application,
-                bundleIdentifier: bundleIdentifier,
+                applicationIdentifier: applicationIdentifier,
                 name: name,
-                icon: icon
+                icon: ApplicationIconResolver.icon(for: application)
             ),
             kind: .openRufSettings(
                 softwareUpdateVersion: softwareUpdateVersion
@@ -178,9 +179,8 @@ final class ApplicationCatalog: NSObject {
             guard
                 discoveryPolicy.isCandidate,
                 !application.isTerminated,
-                let bundleIdentifier = application.bundleIdentifier,
-                let name = application.localizedName,
-                let icon = ApplicationIconResolver.icon(for: application)
+                let applicationIdentifier = application.applicationIdentifier,
+                let name = application.localizedName
             else {
                 return nil
             }
@@ -188,11 +188,11 @@ final class ApplicationCatalog: NSObject {
             return ApplicationInstance(
                 item: ApplicationItem(
                     application: application,
-                    bundleIdentifier: bundleIdentifier,
+                    applicationIdentifier: applicationIdentifier,
                     name: name,
-                    icon: icon
+                    icon: ApplicationIconResolver.icon(for: application)
                 ),
-                applicationIdentifier: bundleIdentifier,
+                applicationIdentifier: applicationIdentifier,
                 name: name,
                 processIdentifier: application.processIdentifier,
                 policy: discoveryPolicy
@@ -229,17 +229,17 @@ final class ApplicationCatalog: NSObject {
     private func recordActivation(_ application: NSRunningApplication) {
         guard
             ApplicationDiscoveryPolicy(application: application).isCandidate,
-            let bundleIdentifier = application.bundleIdentifier
+            let applicationIdentifier = application.applicationIdentifier
         else {
             return
         }
 
         recentProcesses.record(application.processIdentifier)
-        guard recentApplications.identifiers.first != bundleIdentifier else {
+        guard recentApplications.identifiers.first != applicationIdentifier else {
             return
         }
 
-        recentApplications.record(bundleIdentifier)
+        recentApplications.record(applicationIdentifier)
 
         UserDefaults.standard.set(
             recentApplications.identifiers,

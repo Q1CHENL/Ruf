@@ -213,7 +213,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let beginSpan = PerformanceLog.begin("switcher.begin")
         model.begin(
             with: targets,
-            currentBundleIdentifier: snapshot.currentBundleIdentifier,
+            currentApplicationIdentifier: snapshot.currentApplicationIdentifier,
             backwards: backwards,
             showsApplicationResourceUsage:
                 preferences.showsApplicationResourceUsage

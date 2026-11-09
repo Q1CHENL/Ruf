@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 
 @MainActor
 enum ApplicationIconResolver {
@@ -14,8 +15,10 @@ enum ApplicationIconResolver {
     private static let dockTilePluginKey = "NSDockTilePlugIn"
     private static var cachedDockTileIcons: [String: CachedDockTileIcon] = [:]
 
-    static func icon(for application: NSRunningApplication) -> NSImage? {
-        preferredDockTileIcon(for: application) ?? application.icon
+    static func icon(for application: NSRunningApplication) -> NSImage {
+        preferredDockTileIcon(for: application)
+            ?? application.icon
+            ?? NSWorkspace.shared.icon(for: .applicationBundle)
     }
 
     private static func preferredDockTileIcon(

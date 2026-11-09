@@ -43,7 +43,7 @@ final class SwitcherModel {
 
     func begin(
         with targets: [SwitchTarget],
-        currentBundleIdentifier: String?,
+        currentApplicationIdentifier: String?,
         backwards: Bool,
         showsApplicationResourceUsage: Bool
     ) {
@@ -53,8 +53,8 @@ final class SwitcherModel {
             $0.participatesInInitialSelection
         }.count
         session.begin(
-            groupIdentifiers: targets.map(\.item.bundleIdentifier),
-            currentGroup: currentBundleIdentifier,
+            groupIdentifiers: targets.map(\.item.applicationIdentifier),
+            currentGroup: currentApplicationIdentifier,
             initialSelectionTargetCount: initialSelectionTargetCount,
             backwards: backwards,
             showsApplicationResourceUsage: showsApplicationResourceUsage
