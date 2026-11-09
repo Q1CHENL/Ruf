@@ -66,6 +66,48 @@ final class SoftwareUpdateAvailabilityTests: XCTestCase {
     }
 
     @MainActor
+    func testRecordingTheInstalledVersionClearsAvailability() {
+        withDefaults { defaults in
+            let availability = SoftwareUpdateAvailability(
+                currentVersion: "0.5.2",
+                defaults: defaults
+            )
+            availability.recordAvailable(version: "0.5.3")
+
+            availability.recordAvailable(version: "0.5.2")
+
+            XCTAssertNil(availability.availableVersion)
+            XCTAssertNil(
+                SoftwareUpdateAvailability(
+                    currentVersion: "0.5.2",
+                    defaults: defaults
+                ).availableVersion
+            )
+        }
+    }
+
+    @MainActor
+    func testRecordingAnEmptyVersionClearsAvailability() {
+        withDefaults { defaults in
+            let availability = SoftwareUpdateAvailability(
+                currentVersion: "0.5.2",
+                defaults: defaults
+            )
+            availability.recordAvailable(version: "0.5.3")
+
+            availability.recordAvailable(version: "")
+
+            XCTAssertNil(availability.availableVersion)
+            XCTAssertNil(
+                SoftwareUpdateAvailability(
+                    currentVersion: "0.5.2",
+                    defaults: defaults
+                ).availableVersion
+            )
+        }
+    }
+
+    @MainActor
     private func withDefaults(
         _ body: (UserDefaults) -> Void
     ) {
