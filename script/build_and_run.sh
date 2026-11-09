@@ -35,16 +35,55 @@ set_artifact_paths \
     "$DIST_DIR/$APP_NAME.app" \
     "$DIST_DIR/$APP_NAME.dmg"
 
-stop_running_app() {
+# Prints the process identifiers running this checkout's bundle, so another
+# copy of Ruf, such as /Applications/Ruf.app, is neither stopped nor mistaken
+# for it.
+running_app_pids() {
     local pid
     local process_path
 
     while IFS= read -r pid; do
         process_path="$(ps -p "$pid" -o comm= 2>/dev/null || true)"
         if [[ "$process_path" == "$APP_BINARY" ]]; then
-            kill "$pid"
+            echo "$pid"
         fi
     done < <(pgrep -x "$APP_NAME" || true)
+}
+
+stop_running_app() {
+    local pid
+
+    while IFS= read -r pid; do
+        kill "$pid"
+    done < <(running_app_pids)
+}
+
+verify_app_stays_running() {
+    local pid=""
+
+    for _ in {1..50}; do
+        pid="$(running_app_pids)"
+        pid="${pid%%$'\n'*}"
+        if [[ -n "$pid" ]]; then
+            break
+        fi
+        sleep 0.1
+    done
+
+    if [[ -z "$pid" ]]; then
+        echo "$APP_BUNDLE did not launch" >&2
+        return 1
+    fi
+
+    # A crash shortly after launch must fail, so the same process has to
+    # outlive a settle period.
+    sleep 3
+    if [[ "$(ps -p "$pid" -o comm= 2>/dev/null || true)" != "$APP_BINARY" ]]; then
+        echo "$APP_BUNDLE exited after launch" >&2
+        return 1
+    fi
+
+    echo "$APP_BUNDLE is running as process $pid"
 }
 
 create_disk_image() {
@@ -623,14 +662,7 @@ case "$MODE" in
         ;;
     verify)
         launch_debug_app
-        for _ in {1..20}; do
-            if pgrep -x "$APP_NAME" >/dev/null; then
-                exit 0
-            fi
-            sleep 0.1
-        done
-        echo "$APP_NAME did not stay running" >&2
-        exit 1
+        verify_app_stays_running
         ;;
     *)
         echo "usage: $0 [run|--package|--release-self-signed|--release-notarized|--appcast|--validate-package|--debug|--logs|--telemetry|--verify]" >&2
