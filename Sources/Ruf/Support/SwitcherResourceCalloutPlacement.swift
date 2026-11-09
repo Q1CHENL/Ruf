@@ -69,7 +69,7 @@ struct SwitcherResourceCalloutPlacement: Equatable {
                         + SwitcherMetrics.horizontalSpacing
                 )
         let maximumY = panelFrame.maxY
-            - SwitcherMetrics.containerInset
+            - SwitcherMetrics.topInset
             - CGFloat(row)
                 * (
                     SwitcherMetrics.cellSize.height

@@ -2,7 +2,9 @@ import SwiftUI
 import RufCore
 
 enum SwitcherMetrics {
-    static let cellSize = CGSize(width: 84, height: 78)
+    // Labels span the cell width, and the bottom row's label padding forms
+    // the panel's edge inset.
+    static let cellSize = CGSize(width: 78, height: 77)
     static let iconSize: CGFloat = 52
     static let iconPlateSize: CGFloat = 42
     static let iconCornerRadius: CGFloat = 10
@@ -12,10 +14,30 @@ enum SwitcherMetrics {
     static let indicatorBadgeSize: CGFloat = 15
     static let dockBadgeHeight: CGFloat = 15
     static let dockBadgeDotSize: CGFloat = 9
-    static let horizontalSpacing: CGFloat = 4
-    static let verticalSpacing: CGFloat = 4
-    static let containerInset: CGFloat = 12
+    static let labelSpacing: CGFloat = 3
+    static let labelHeight: CGFloat = 14
+    /// Distance between neighboring cells in both directions, which leaves
+    /// the same gap between neighboring icon plates horizontally and
+    /// vertically.
+    static let gridPitch: CGFloat = 82
+    static let horizontalSpacing = gridPitch - cellSize.width
+    static let verticalSpacing = gridPitch - cellSize.height
     static let cornerRadius: CGFloat = 22
+
+    // The icon and label are centered in each cell; the icon art draws a
+    // smaller plate centered in its frame.
+    private static let plateTopInCell =
+        (cellSize.height - iconSize - labelSpacing - labelHeight) / 2
+        + (iconSize - iconPlateSize) / 2
+    private static let plateSideInCell = (cellSize.width - iconPlateSize) / 2
+
+    /// Visible gap between the outer icon plates and every panel edge. The
+    /// bottom row's cell ends at the panel edge so its label stays inside;
+    /// the top and side insets match the resulting plate gap.
+    private static let plateEdgeInset =
+        cellSize.height - plateTopInCell - iconPlateSize
+    static let topInset = plateEdgeInset - plateTopInCell
+    static let horizontalInset = plateEdgeInset - plateSideInCell
 
     static func panelSize(itemCount: Int) -> CGSize {
         let navigation = GridNavigation(itemCount: itemCount)
@@ -28,8 +50,8 @@ enum SwitcherMetrics {
             + CGFloat(rows - 1) * verticalSpacing
 
         return CGSize(
-            width: gridWidth + 2 * containerInset,
-            height: gridHeight + 2 * containerInset
+            width: gridWidth + 2 * horizontalInset,
+            height: gridHeight + topInset
         )
     }
 }
@@ -59,7 +81,8 @@ struct SwitcherView: View {
                 .frame(maxWidth: .infinity, alignment: .center)
             }
         }
-        .padding(SwitcherMetrics.containerInset)
+        .padding(.top, SwitcherMetrics.topInset)
+        .padding(.horizontal, SwitcherMetrics.horizontalInset)
         .animation(.easeOut(duration: 0.08), value: model.selectedIndex)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Ruf app and window grid")
@@ -73,7 +96,7 @@ private struct SwitchTargetCell: View {
 
     var body: some View {
         Button(action: onChoose) {
-            VStack(spacing: 3) {
+            VStack(spacing: SwitcherMetrics.labelSpacing) {
                 Image(nsImage: target.item.icon)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
@@ -187,25 +210,22 @@ private struct SwitchTargetLabel: View {
     let isSelected: Bool
 
     var body: some View {
-        Group {
-            if isWindowTitle {
-                Text(title)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .frame(width: SwitcherMetrics.cellSize.width)
-            } else {
-                Text(title)
-                    .lineLimit(1)
-                    .fixedSize(horizontal: true, vertical: false)
+        // Labels stay within their cell so edge-column labels remain inside
+        // the panel's narrow side insets.
+        Text(title)
+            .lineLimit(1)
+            .truncationMode(isWindowTitle ? .middle : .tail)
+            .frame(
+                width: SwitcherMetrics.cellSize.width,
+                height: SwitcherMetrics.labelHeight
+            )
+            .foregroundStyle(
+                Color.primary.opacity(isSelected ? 0.75 : 0.35)
+            )
+            .opacity(isWindowTitle || isSelected ? 1 : 0)
+            .font(.system(size: 11, weight: .medium))
+            .transaction { transaction in
+                transaction.animation = nil
             }
-        }
-        .foregroundStyle(
-            Color.primary.opacity(isSelected ? 0.75 : 0.35)
-        )
-        .opacity(isWindowTitle || isSelected ? 1 : 0)
-        .font(.system(size: 11, weight: .medium))
-        .transaction { transaction in
-            transaction.animation = nil
-        }
     }
 }

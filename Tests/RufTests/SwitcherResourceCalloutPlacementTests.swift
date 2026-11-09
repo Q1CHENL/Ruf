@@ -25,7 +25,7 @@ final class SwitcherResourceCalloutPlacementTests: XCTestCase {
         XCTAssertEqual(
             frame.maxY,
             panelFrame.maxY
-                - SwitcherMetrics.containerInset
+                - SwitcherMetrics.topInset
                 - SwitcherMetrics.cellSize.height
                 - SwitcherMetrics.verticalSpacing,
             accuracy: 0.001
