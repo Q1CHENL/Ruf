@@ -30,7 +30,14 @@ final class FocusedWindowMover: NSObject {
         let destinationDisplayFrame: CGRect
         let style: WindowMovementStyle
         let startTimestamp: CFTimeInterval
+        // Zero when the window is placed at once: with Reduce Motion, or
+        // when there is no distance to animate.
+        let duration: CFTimeInterval
         var currentFrame: CGRect
+
+        var showsOutline: Bool {
+            style == .outline && duration > 0
+        }
 
         var destinationFrame: CGRect {
             mutationPlan.destinationFrame
@@ -40,7 +47,7 @@ final class FocusedWindowMover: NSObject {
     private enum MutationPurpose: Sendable {
         case frame(animationIdentifier: UInt64)
         case animationCompletion(animationIdentifier: UInt64)
-        case placement(projectionToken: WindowMovementProjectionToken?)
+        case placement
 
         var animationIdentifier: UInt64? {
             switch self {
@@ -65,13 +72,6 @@ final class FocusedWindowMover: NSObject {
         let window: AXUIElement
         let mutations: [WindowFrameMutation]
         let purpose: MutationPurpose
-
-        var projectionIdentifier: UInt64? {
-            guard case let .placement(projectionToken) = purpose else {
-                return nil
-            }
-            return projectionToken?.identifier
-        }
     }
 
     private static let animationDuration: CFTimeInterval = 0.2
@@ -92,8 +92,6 @@ final class FocusedWindowMover: NSObject {
         WindowMutationRequest,
         UInt64
     >()
-    private var projectedMovement = WindowMovementProjectionState()
-    private var projectedWindow: AXUIElement?
 
     func move(
         _ direction: WindowMoveDirection,
@@ -105,20 +103,13 @@ final class FocusedWindowMover: NSObject {
 
         let screens = screenSnapshots()
         guard screens.count > 1 else {
-            invalidateProjectedMovement()
             stopAnimation(.displayConfigurationChanged)
             return
         }
 
         guard let window = focusedWindow() else {
-            invalidateProjectedMovement()
             return
         }
-
-        let projection = validProjectedMovement(
-            for: window.element,
-            screens: screens
-        )
 
         let retargeting: (
             animation: ActiveAnimation,
@@ -143,15 +134,12 @@ final class FocusedWindowMover: NSObject {
             retargeting = nil
         }
 
-        let planningFrame = retargeting?.animation.destinationFrame
-            ?? projection?.destinationFrame
-            ?? window.frame
         guard let plan = WindowMovementPlanner.plan(
-            windowFrame: planningFrame,
+            windowFrame: retargeting?.animation.destinationFrame
+                ?? window.frame,
             displays: screens.map(\.geometry),
             direction: direction,
             preferredSourceDisplay: retargeting?.source
-                ?? projection?.destinationDisplay
         ), let destinationScreen = screens.first(where: {
             $0.geometry == plan.destinationDisplay
         }) else {
@@ -159,7 +147,7 @@ final class FocusedWindowMover: NSObject {
         }
 
         let mutationPlan = WindowMovementMutationPlan(
-            from: retargeting == nil ? planningFrame : window.frame,
+            from: window.frame,
             to: plan.destinationFrame
         )
         guard !mutationPlan.requiresResize
@@ -167,28 +155,11 @@ final class FocusedWindowMover: NSObject {
             return
         }
 
-        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
-            stopAnimation(.retargeted)
-            let projection = projectedMovement.project(
-                destinationFrame: plan.destinationFrame,
-                destinationDisplay: plan.destinationDisplay
-            )
-            projectedWindow = window.element
-            placeWindow(
-                target: window.mutationTarget,
-                with: mutationPlan,
-                purpose: .placement(projectionToken: projection.token)
-            )
-            return
-        }
-
         let startFrame: CGRect
         if let previous = retargeting?.animation,
-           previous.style == .outline,
+           previous.showsOutline,
            style == .outline {
             startFrame = previous.currentFrame
-        } else if retargeting == nil, let projection {
-            startFrame = projection.destinationFrame
         } else {
             startFrame = window.frame
         }
@@ -199,12 +170,13 @@ final class FocusedWindowMover: NSObject {
             from: startFrame,
             with: mutationPlan,
             on: destinationScreen,
-            style: style
+            style: style,
+            reducesMotion: NSWorkspace.shared
+                .accessibilityDisplayShouldReduceMotion
         )
     }
 
     func stop() {
-        invalidateProjectedMovement()
         stopAnimation(.shutdown)
     }
 
@@ -214,30 +186,23 @@ final class FocusedWindowMover: NSObject {
         from startFrame: CGRect,
         with mutationPlan: WindowMovementMutationPlan,
         on destinationScreen: ScreenSnapshot,
-        style: WindowMovementStyle
+        style: WindowMovementStyle,
+        reducesMotion: Bool
     ) {
-        let preservesOutline = activeAnimation?.style == .outline
-            && style == .outline
-        stopAnimation(.retargeted, hidesOutline: !preservesOutline)
-
-        let needsAnimation = switch style {
+        let hasDistance = switch style {
         case .live:
             startFrame.origin != mutationPlan.destinationPosition
         case .outline:
             startFrame != mutationPlan.destinationFrame
         }
-        guard needsAnimation else {
-            outlineController.hide()
-            placeWindow(
-                target: mutationTarget,
-                with: mutationPlan,
-                purpose: .placement(projectionToken: nil)
-            )
-            return
-        }
+        let needsAnimation = hasDistance && !reducesMotion
+        let preservesOutline = activeAnimation?.showsOutline == true
+            && style == .outline
+            && needsAnimation
+        stopAnimation(.retargeted, hidesOutline: !preservesOutline)
 
         nextAnimationIdentifier += 1
-        activeAnimation = ActiveAnimation(
+        let animation = ActiveAnimation(
             identifier: nextAnimationIdentifier,
             window: window,
             mutationTarget: mutationTarget,
@@ -246,8 +211,26 @@ final class FocusedWindowMover: NSObject {
             destinationDisplayFrame: destinationScreen.geometry.frame,
             style: style,
             startTimestamp: CACurrentMediaTime(),
-            currentFrame: startFrame
+            duration: needsAnimation ? Self.animationDuration : 0,
+            currentFrame: needsAnimation
+                ? startFrame
+                : mutationPlan.destinationFrame
         )
+        activeAnimation = animation
+
+        // An instant move keeps its animation until the final placement
+        // finishes, so a further move plans from where the window is headed
+        // and replaces the placement if it has not started yet.
+        guard needsAnimation else {
+            placeWindow(
+                target: mutationTarget,
+                with: mutationPlan,
+                purpose: .animationCompletion(
+                    animationIdentifier: animation.identifier
+                )
+            )
+            return
+        }
 
         if style == .outline {
             outlineController.show(frame: appKitFrame(from: startFrame))
@@ -275,7 +258,7 @@ final class FocusedWindowMover: NSObject {
                 max(
                     0,
                     (displayLink.targetTimestamp - animation.startTimestamp)
-                        / Self.animationDuration
+                        / animation.duration
                 )
             )
         )
@@ -352,7 +335,7 @@ final class FocusedWindowMover: NSObject {
             return
         }
 
-        if hidesOutline, animation.style == .outline {
+        if hidesOutline, animation.showsOutline {
             outlineController.hide()
         }
         windowWrites.removePendingRequests(
@@ -366,7 +349,7 @@ final class FocusedWindowMover: NSObject {
         placeWindow(
             target: animation.mutationTarget,
             with: animation.mutationPlan,
-            purpose: .placement(projectionToken: nil),
+            purpose: .placement,
             synchronously: reason == .shutdown
         )
     }
@@ -476,60 +459,8 @@ final class FocusedWindowMover: NSObject {
                         : .finalPlacementFailed
                 )
             }
-        case let .placement(projectionToken):
-            guard let projectionToken else {
-                return
-            }
-
-            switch projectedMovement.finish(
-                projectionToken,
-                succeeded: resolution == .proceed
-            ) {
-            case .unchanged:
-                break
-            case .cleared:
-                projectedWindow = nil
-            case .failed:
-                discardPendingProjectedMovements(
-                    identifier: projectionToken.identifier
-                )
-                if projectedMovement.current == nil {
-                    projectedWindow = nil
-                }
-            }
-        }
-    }
-
-    private func validProjectedMovement(
-        for window: AXUIElement,
-        screens: [ScreenSnapshot]
-    ) -> WindowMovementProjection? {
-        guard let projection = projectedMovement.current else {
-            projectedWindow = nil
-            return nil
-        }
-        guard let projectedWindow,
-              CFEqual(projectedWindow, window),
-              screens.contains(where: {
-                  $0.geometry == projection.destinationDisplay
-              }) else {
-            invalidateProjectedMovement()
-            return nil
-        }
-        return projection
-    }
-
-    private func invalidateProjectedMovement() {
-        projectedWindow = nil
-        guard let identifier = projectedMovement.invalidate() else {
-            return
-        }
-        discardPendingProjectedMovements(identifier: identifier)
-    }
-
-    private func discardPendingProjectedMovements(identifier: UInt64) {
-        windowWrites.removePendingRequests {
-            $0.projectionIdentifier == identifier
+        case .placement:
+            break
         }
     }
 
