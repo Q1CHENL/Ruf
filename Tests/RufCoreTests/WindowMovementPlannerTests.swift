@@ -218,6 +218,83 @@ final class WindowMovementPlannerTests: XCTestCase {
         )
     }
 
+    func testMapsRelativePlacementDownAndBackUp() throws {
+        let top = display(x: 0, y: 0, width: 1_000, height: 800)
+        let bottom = display(x: 200, y: 800, width: 500, height: 400)
+        let displays = [top, bottom]
+        let window = CGRect(x: 300, y: 250, width: 400, height: 300)
+
+        let down = try XCTUnwrap(
+            planner.plan(
+                windowFrame: window,
+                displays: displays,
+                direction: .down
+            )
+        )
+        XCTAssertEqual(down.destinationDisplay, bottom)
+        XCTAssertEqual(
+            down.destinationFrame,
+            CGRect(x: 250, y: 850, width: 400, height: 300)
+        )
+
+        let up = try XCTUnwrap(
+            planner.plan(
+                windowFrame: down.destinationFrame,
+                displays: displays,
+                direction: .up
+            )
+        )
+        XCTAssertEqual(up.destinationDisplay, top)
+        XCTAssertEqual(up.destinationFrame, window)
+    }
+
+    func testShrinksOnlyTheOversizedHeightWhenMovingDown() throws {
+        let top = display(x: 0, y: 0, width: 1_000, height: 800)
+        let bottom = display(x: 200, y: 800, width: 500, height: 400)
+
+        let plan = try XCTUnwrap(
+            planner.plan(
+                windowFrame: CGRect(x: 300, y: 100, width: 400, height: 600),
+                displays: [top, bottom],
+                direction: .down
+            )
+        )
+
+        XCTAssertEqual(
+            plan.destinationFrame,
+            CGRect(x: 250, y: 800, width: 400, height: 400)
+        )
+    }
+
+    func testFullSpanToleratesEdgesWithinTwoPoints() throws {
+        let source = display(x: 0, y: 0, width: 500, height: 400)
+        let destination = display(x: 500, y: 0, width: 1_000, height: 800)
+
+        let withinTolerance = try XCTUnwrap(
+            planner.plan(
+                windowFrame: CGRect(x: 2, y: 100, width: 496, height: 200),
+                displays: [source, destination],
+                direction: .right
+            )
+        )
+        XCTAssertEqual(
+            withinTolerance.destinationFrame,
+            CGRect(x: 500, y: 300, width: 1_000, height: 200)
+        )
+
+        let beyondTolerance = try XCTUnwrap(
+            planner.plan(
+                windowFrame: CGRect(x: 3, y: 100, width: 494, height: 200),
+                displays: [source, destination],
+                direction: .right
+            )
+        )
+        XCTAssertEqual(
+            beyondTolerance.destinationFrame,
+            CGRect(x: 753, y: 300, width: 494, height: 200)
+        )
+    }
+
     func testPreferredSourceSupportsRetargetingAnAnimationInFlight() throws {
         let left = display(x: 0, y: 0, width: 1_000, height: 800)
         let middle = display(x: 1_000, y: 0, width: 1_000, height: 800)
