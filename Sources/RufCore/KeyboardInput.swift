@@ -135,7 +135,9 @@ public struct KeyboardInputSession: Sendable {
     private var activeSwitcherGestureID: UInt64?
     private var pendingSwitcherGesture: PendingSwitcherGesture?
     private var lastPendingSwitcherGestureToken: UInt64 = 0
-    private var lastSwitcherGestureID: UInt64 = 0
+    /// The newest gesture this session has started. Gesture IDs only
+    /// increase, so every gesture up to it has started.
+    public private(set) var lastSwitcherGestureID: UInt64 = 0
     /// Keys whose press the switcher consumed and that are still down. A
     /// gesture can end while one is held, so its repeats and release stay
     /// consumed instead of reaching the application the gesture activated.

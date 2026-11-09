@@ -154,17 +154,21 @@ final class KeyboardEventTap {
     }
 
     func stop() {
-        resetInputSession()
+        interruptInputSession()
         tearDownEventTap()
     }
 
-    func resetInputSession() {
+    /// Ends every gesture the input session has started, for a switcher the
+    /// app closed itself, and returns the newest one's ID.
+    func endSwitcherGestures() -> UInt64 {
         pendingGestureTimeoutTask?.cancel()
         pendingGestureTimeoutTask = nil
         inputSession.reset()
+        return inputSession.lastSwitcherGestureID
     }
 
-    func resetInputSession(forSwitcherGesture gestureID: UInt64) {
+    /// Ends `gestureID` if the input session is still following it.
+    func endSwitcherGesture(_ gestureID: UInt64) {
         let previousGestureToken = inputSession.pendingSwitcherGestureToken
         inputSession.resetSwitcherGesture(ifMatching: gestureID)
         synchronizePendingGestureTimeout(previousToken: previousGestureToken)
@@ -187,11 +191,21 @@ final class KeyboardEventTap {
         }
 
         if commandTabChanged || switcherShortcutsChanged {
-            resetInputSession()
+            interruptInputSession()
         }
         self.capturesCommandTab = capturesCommandTab
         self.capturesWindowMovement = capturesWindowMovement
         self.enabledSwitcherShortcuts = enabledSwitcherShortcuts
+    }
+
+    /// Cancels the active gesture when the tap can no longer follow it, so
+    /// the switcher closes instead of waiting for a release it will not see.
+    private func interruptInputSession() {
+        let previousGestureToken = inputSession.pendingSwitcherGestureToken
+        if let command = inputSession.interrupt() {
+            enqueue(command)
+        }
+        synchronizePendingGestureTimeout(previousToken: previousGestureToken)
     }
 
     private func tearDownEventTap() {
@@ -215,17 +229,12 @@ final class KeyboardEventTap {
         isRepeat: Bool,
         characters: String?
     ) -> Bool {
-        let previousGestureToken = inputSession.pendingSwitcherGestureToken
-
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             if let eventTap {
                 CGEvent.tapEnable(tap: eventTap, enable: true)
             }
 
-            if let action = inputSession.interrupt() {
-                enqueue(action)
-            }
-            synchronizePendingGestureTimeout(previousToken: previousGestureToken)
+            interruptInputSession()
             return false
         }
 
@@ -241,6 +250,7 @@ final class KeyboardEventTap {
             return false
         }
 
+        let previousGestureToken = inputSession.pendingSwitcherGestureToken
         let decision = inputSession.interpret(
             KeyboardInput(
                 kind: kind,

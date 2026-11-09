@@ -18,8 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private lazy var panelController = SwitcherPanelController(
         model: model,
         onChoose: { [weak self] index in
-            self?.model.select(index)
-            self?.commitSelection()
+            self?.chooseTarget(at: index)
         }
     )
 
@@ -121,10 +120,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func handleSwitcher(_ command: SwitcherCommand) {
         switch loadingSession.receive(command) {
-        case .queued:
+        case .queued, .discard:
             return
         case .cancelLoading:
-            cancelSwitcher(forSwitcherGesture: command.gestureID)
+            cancelSwitcher()
             resumeNextSwitcherGesture()
             return
         case .handleImmediately:
@@ -154,9 +153,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .quitApplication:
             quitSelectedApplication()
         case .commit:
-            commitSelection(forSwitcherGesture: command.gestureID)
+            commitSelection()
         case .cancel:
-            cancelSwitcher(forSwitcherGesture: command.gestureID)
+            cancelSwitcher()
         }
     }
 
@@ -202,9 +201,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         guard !targets.isEmpty else {
             endOpenSpan("aborted targets=0")
-            keyboardEventTap.resetInputSession(
-                forSwitcherGesture: gestureID
-            )
+            // Nothing to switch to ends the gesture without a keyboard
+            // command, so its later commands must not load targets again.
+            keyboardEventTap.endSwitcherGesture(gestureID)
+            loadingSession.endGestures(through: gestureID)
             resumeNextSwitcherGesture()
             return
         }
@@ -236,14 +236,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         endOpenSpan("targets=\(targets.count)")
     }
 
-    private func commitSelection(forSwitcherGesture gestureID: UInt64? = nil) {
-        if let gestureID {
-            keyboardEventTap.resetInputSession(
-                forSwitcherGesture: gestureID
-            )
-        } else {
-            keyboardEventTap.resetInputSession()
-        }
+    private func chooseTarget(at index: Int) {
+        // A click ends the gesture without a keyboard command, so commands
+        // still on their way, such as a Tab repeat, must not reopen it.
+        loadingSession.endGestures(
+            through: keyboardEventTap.endSwitcherGestures()
+        )
+        model.select(index)
+        commitSelection()
+    }
+
+    private func commitSelection() {
         guard let target = takeSelection() else {
             return
         }
@@ -350,20 +353,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         self.openSpan = nil
     }
 
-    private func cancelSwitcher(forSwitcherGesture gestureID: UInt64? = nil) {
+    private func cancelSwitcher() {
         snapshotTask?.cancel()
         snapshotTask = nil
         endOpenSpan("cancelled")
-
-        if let gestureID {
-            keyboardEventTap.resetInputSession(
-                forSwitcherGesture: gestureID
-            )
-        } else {
-            loadingSession.cancelLoading()
-            keyboardEventTap.resetInputSession()
-        }
-
         stopApplicationResourceUsage()
         model.cancel()
         panelController.cancel()
@@ -514,11 +507,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func applyKeyboardCapturePreferences() {
-        if preferences.switcherMode == .system,
-           model.isPresented || loadingSession.isLoading {
-            cancelSwitcher()
-        }
-
         let accessibilityGranted = AccessibilityPermission.isGranted
         refreshKeyboardCaptureState(accessibilityGranted: accessibilityGranted)
 

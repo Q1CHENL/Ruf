@@ -1038,6 +1038,20 @@ final class KeyboardInputSessionTests: XCTestCase {
         XCTAssertNotEqual(firstGestureID, secondGestureID)
     }
 
+    func testLastGestureIDStillCoversAGestureAfterAReset() throws {
+        var session = KeyboardInputSession()
+        let gestureID = try XCTUnwrap(
+            session.interpret(
+                commandTabInput(),
+                capturesCommandTab: true
+            ).command?.switcherCommand?.gestureID
+        )
+
+        session.reset()
+
+        XCTAssertEqual(session.lastSwitcherGestureID, gestureID)
+    }
+
     func testStaleGestureResetCannotClearANewerGesture() throws {
         var session = KeyboardInputSession()
         let firstCycle = session.interpret(

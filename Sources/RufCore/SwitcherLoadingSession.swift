@@ -2,6 +2,8 @@ public enum SwitcherLoadingDisposition: Equatable, Sendable {
     case handleImmediately
     case queued
     case cancelLoading
+    /// The command belongs to a gesture that has already ended.
+    case discard
 }
 
 public struct SwitcherGestureActions: Equatable, Sendable {
@@ -21,6 +23,10 @@ public struct SwitcherGestureActions: Equatable, Sendable {
 public struct SwitcherLoadingSession: Sendable {
     private var activeGesture: SwitcherGestureActions?
     private var deferredGestures: [SwitcherGestureActions] = []
+    /// Every gesture up to this ID has ended. Gesture IDs only increase, so a
+    /// command at or below it was sent before its gesture ended and must not
+    /// act on, or reopen, the switcher.
+    private var lastEndedGestureID: UInt64 = 0
 
     public init() {}
 
@@ -38,6 +44,10 @@ public struct SwitcherLoadingSession: Sendable {
     public mutating func receive(
         _ command: SwitcherCommand
     ) -> SwitcherLoadingDisposition {
+        guard command.gestureID > lastEndedGestureID else {
+            return .discard
+        }
+
         guard let activeGesture else {
             return .handleImmediately
         }
@@ -78,9 +88,15 @@ public struct SwitcherLoadingSession: Sendable {
         return deferredGestures.removeFirst()
     }
 
-    public mutating func cancelLoading() {
-        finishActiveLoading()
-        deferredGestures = []
+    /// Ends every gesture up to `gestureID` that the app finished without a
+    /// terminal keyboard command, such as a mouse choice, and drops what
+    /// they queued.
+    public mutating func endGestures(through gestureID: UInt64) {
+        lastEndedGestureID = max(lastEndedGestureID, gestureID)
+        if let activeGesture, activeGesture.gestureID <= gestureID {
+            finishActiveLoading()
+        }
+        deferredGestures.removeAll { $0.gestureID <= gestureID }
     }
 
     private mutating func deferCommand(_ command: SwitcherCommand) {
