@@ -342,6 +342,45 @@ final class KeyboardInputSessionTests: XCTestCase {
         )
     }
 
+    func testRepressedShortcutKeyHoldsTheGestureUntilItIsReleasedAgain() {
+        var session = cyclingSession()
+        _ = session.interpret(commandNInput(), capturesCommandTab: true)
+        _ = session.interpret(
+            keyUpInput(newWindowKeyCode, modifiers: [.command]),
+            capturesCommandTab: true
+        )
+
+        XCTAssertEqual(
+            session.interpret(commandNInput(), capturesCommandTab: true),
+            KeyboardDecision(command: nil, isConsumed: true)
+        )
+        XCTAssertEqual(
+            session.interpret(commandReleaseInput(), capturesCommandTab: true),
+            KeyboardDecision(command: nil, isConsumed: false)
+        )
+        XCTAssertTrue(session.isCycling)
+        XCTAssertEqual(
+            session.interpret(
+                KeyboardInput(
+                    kind: .keyDown,
+                    keyCode: newWindowKeyCode,
+                    modifiers: [],
+                    isRepeat: true
+                ),
+                capturesCommandTab: true
+            ),
+            KeyboardDecision(command: nil, isConsumed: true)
+        )
+        XCTAssertEqual(
+            session.interpret(
+                keyUpInput(newWindowKeyCode),
+                capturesCommandTab: true
+            ),
+            switcherDecision(.openNewWindow)
+        )
+        XCTAssertFalse(session.isCycling)
+    }
+
     func testNewWindowGestureRecognizesThePhysicalNKeyOnNonLatinLayouts() {
         var session = cyclingSession()
 
@@ -799,6 +838,119 @@ final class KeyboardInputSessionTests: XCTestCase {
         XCTAssertFalse(session.isCycling)
     }
 
+    func testKeyThatEndsTheGestureStaysConsumedUntilReleased() {
+        let cases: [(KeyboardInput, SwitcherAction)] = [
+            (keyDownInput(KeyboardKeyCode.returnKey), .commit),
+            (keyDownInput(KeyboardKeyCode.keypadEnter), .commit),
+            (keyDownInput(KeyboardKeyCode.escape), .cancel),
+            // A key without Command recovers a missed Command release.
+            (keyDownInput(0, modifiers: []), .commit),
+        ]
+
+        for (input, action) in cases {
+            var session = cyclingSession()
+            XCTAssertEqual(
+                session.interpret(input, capturesCommandTab: true),
+                switcherDecision(action)
+            )
+
+            XCTAssertEqual(
+                session.interpret(
+                    keyDownInput(input.keyCode, modifiers: [], isRepeat: true),
+                    capturesCommandTab: true
+                ),
+                KeyboardDecision(command: nil, isConsumed: true)
+            )
+            XCTAssertEqual(
+                session.interpret(
+                    keyUpInput(input.keyCode),
+                    capturesCommandTab: true
+                ),
+                KeyboardDecision(command: nil, isConsumed: true)
+            )
+
+            XCTAssertEqual(
+                session.interpret(
+                    keyDownInput(input.keyCode, modifiers: []),
+                    capturesCommandTab: true
+                ),
+                KeyboardDecision(command: nil, isConsumed: false)
+            )
+            XCTAssertEqual(
+                session.interpret(
+                    keyUpInput(input.keyCode),
+                    capturesCommandTab: true
+                ),
+                KeyboardDecision(command: nil, isConsumed: false)
+            )
+        }
+    }
+
+    func testTabHeldPastTheCommandReleaseStaysConsumedUntilReleased() {
+        var session = cyclingSession()
+        XCTAssertEqual(
+            session.interpret(commandReleaseInput(), capturesCommandTab: true),
+            switcherDecision(.commit, isConsumed: false)
+        )
+
+        XCTAssertEqual(
+            session.interpret(
+                keyDownInput(KeyboardKeyCode.tab, modifiers: [], isRepeat: true),
+                capturesCommandTab: true
+            ),
+            KeyboardDecision(command: nil, isConsumed: true)
+        )
+        XCTAssertEqual(
+            session.interpret(
+                keyUpInput(KeyboardKeyCode.tab),
+                capturesCommandTab: true
+            ),
+            KeyboardDecision(command: nil, isConsumed: true)
+        )
+        XCTAssertEqual(
+            session.interpret(
+                keyDownInput(KeyboardKeyCode.tab, modifiers: []),
+                capturesCommandTab: true
+            ),
+            KeyboardDecision(command: nil, isConsumed: false)
+        )
+    }
+
+    func testFreshPressAfterAMissedReleaseIsReadAsNewInput() {
+        var session = cyclingSession()
+        _ = session.interpret(
+            keyDownInput(KeyboardKeyCode.returnKey),
+            capturesCommandTab: true
+        )
+
+        // The Return release went unseen, so this press is a new one.
+        XCTAssertEqual(
+            session.interpret(
+                keyDownInput(KeyboardKeyCode.returnKey, modifiers: []),
+                capturesCommandTab: true
+            ),
+            KeyboardDecision(command: nil, isConsumed: false)
+        )
+        XCTAssertEqual(
+            session.interpret(
+                keyDownInput(
+                    KeyboardKeyCode.returnKey,
+                    modifiers: [],
+                    isRepeat: true
+                ),
+                capturesCommandTab: true
+            ),
+            KeyboardDecision(command: nil, isConsumed: false)
+        )
+        XCTAssertEqual(
+            session.interpret(
+                keyUpInput(KeyboardKeyCode.returnKey),
+                capturesCommandTab: true
+            ),
+            KeyboardDecision(command: nil, isConsumed: false)
+        )
+    }
+
     func testPendingSwitcherGestureCancelsWithEscape() {
         var session = cyclingSession()
         _ = session.interpret(commandNInput(), capturesCommandTab: true)
@@ -1060,6 +1212,31 @@ final class KeyboardInputSessionTests: XCTestCase {
             modifiers: [.command],
             isRepeat: isRepeat,
             characters: "q"
+        )
+    }
+
+    private func keyDownInput(
+        _ keyCode: Int64,
+        modifiers: KeyboardModifiers = [.command],
+        isRepeat: Bool = false
+    ) -> KeyboardInput {
+        KeyboardInput(
+            kind: .keyDown,
+            keyCode: keyCode,
+            modifiers: modifiers,
+            isRepeat: isRepeat
+        )
+    }
+
+    private func keyUpInput(
+        _ keyCode: Int64,
+        modifiers: KeyboardModifiers = []
+    ) -> KeyboardInput {
+        KeyboardInput(
+            kind: .keyUp,
+            keyCode: keyCode,
+            modifiers: modifiers,
+            isRepeat: false
         )
     }
 

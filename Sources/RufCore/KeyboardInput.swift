@@ -136,6 +136,10 @@ public struct KeyboardInputSession: Sendable {
     private var pendingSwitcherGesture: PendingSwitcherGesture?
     private var lastPendingSwitcherGestureToken: UInt64 = 0
     private var lastSwitcherGestureID: UInt64 = 0
+    /// Keys whose press the switcher consumed and that are still down. A
+    /// gesture can end while one is held, so its repeats and release stay
+    /// consumed instead of reaching the application the gesture activated.
+    private var consumedKeyCodes: Set<Int64> = []
 
     public var isCycling: Bool {
         activeSwitcherGestureID != nil
@@ -154,6 +158,61 @@ public struct KeyboardInputSession: Sendable {
         capturesCommandTab: Bool,
         capturesWindowMovement: Bool = true,
         enabledSwitcherShortcuts: SwitcherShortcuts = .all
+    ) -> KeyboardDecision {
+        if let decision = continueConsumedKeyPress(with: input) {
+            return decision
+        }
+
+        let wasCycling = isCycling
+        let decision = interpretSwitcherInput(
+            input,
+            capturesCommandTab: capturesCommandTab,
+            capturesWindowMovement: capturesWindowMovement,
+            enabledSwitcherShortcuts: enabledSwitcherShortcuts
+        )
+
+        if input.kind == .keyDown,
+           decision.isConsumed,
+           wasCycling || isCycling {
+            consumedKeyCodes.insert(input.keyCode)
+        }
+
+        return decision
+    }
+
+    /// Keeps consuming a held key's repeats and release after the gesture
+    /// that consumed its press has ended. Returns nil when the session should
+    /// read `input` itself.
+    private mutating func continueConsumedKeyPress(
+        with input: KeyboardInput
+    ) -> KeyboardDecision? {
+        guard input.kind != .flagsChanged,
+              consumedKeyCodes.contains(input.keyCode) else {
+            return nil
+        }
+
+        switch input.kind {
+        case .keyDown where !input.isRepeat:
+            // A new press means the release went unseen, so this press
+            // belongs to whatever comes next.
+            consumedKeyCodes.remove(input.keyCode)
+            return nil
+        case .keyUp:
+            consumedKeyCodes.remove(input.keyCode)
+        case .keyDown, .flagsChanged:
+            break
+        }
+
+        return isCycling
+            ? nil
+            : KeyboardDecision(command: nil, isConsumed: true)
+    }
+
+    private mutating func interpretSwitcherInput(
+        _ input: KeyboardInput,
+        capturesCommandTab: Bool,
+        capturesWindowMovement: Bool,
+        enabledSwitcherShortcuts: SwitcherShortcuts
     ) -> KeyboardDecision {
         if let pendingSwitcherGesture {
             if let decision = continueSwitcherGesture(
@@ -279,9 +338,15 @@ public struct KeyboardInputSession: Sendable {
 
         var gesture = pendingGesture
 
-        if input.kind == .keyUp,
-           input.keyCode == gesture.triggerKeyCode {
+        switch input.kind {
+        case .keyDown:
+            // Pressing the trigger key again, even after releasing it,
+            // holds the gesture until this press is released too.
+            gesture.isTriggerKeyDown = true
+        case .keyUp where input.keyCode == gesture.triggerKeyCode:
             gesture.isTriggerKeyDown = false
+        case .keyUp, .flagsChanged:
+            break
         }
 
         let isCommandDown = input.modifiers.contains(.command)
