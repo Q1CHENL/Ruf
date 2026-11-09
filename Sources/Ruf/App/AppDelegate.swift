@@ -192,7 +192,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         backwards: Bool,
         gestureID: UInt64
     ) {
-        guard let replayPlan = loadingSession.finishLoading(
+        guard let queuedActions = loadingSession.finishLoading(
             for: gestureID
         ) else {
             return
@@ -218,7 +218,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         )
         PerformanceLog.end(beginSpan)
 
-        for action in replayPlan.beforePresentation {
+        // Replay what the gesture did while loading before showing the panel,
+        // so a gesture that already ended never flashes it.
+        for action in queuedActions {
             handleSwitcher(
                 SwitcherCommand(gestureID: gestureID, action: action)
             )
@@ -232,20 +234,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         panelController.show(itemCount: targets.count)
         synchronizeApplicationResourceUsage()
         endOpenSpan("targets=\(targets.count)")
-
-        for action in replayPlan.afterPresentation {
-            handleSwitcher(
-                SwitcherCommand(gestureID: gestureID, action: action)
-            )
-            if case .openNewWindow = action {
-                resumeNextSwitcherGesture()
-                return
-            }
-            guard model.isPresented else {
-                resumeNextSwitcherGesture()
-                return
-            }
-        }
     }
 
     private func commitSelection(forSwitcherGesture gestureID: UInt64? = nil) {

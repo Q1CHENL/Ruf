@@ -1,24 +1,3 @@
-public struct SwitcherActionReplayPlan: Equatable, Sendable {
-    public let beforePresentation: [SwitcherAction]
-    public let afterPresentation: [SwitcherAction]
-
-    public init(pendingActions: [SwitcherAction]) {
-        guard let presentationBoundary = pendingActions.firstIndex(where: {
-            if case .openNewWindow = $0 {
-                return true
-            }
-            return false
-        }) else {
-            beforePresentation = pendingActions
-            afterPresentation = []
-            return
-        }
-
-        beforePresentation = Array(pendingActions[..<presentationBoundary])
-        afterPresentation = Array(pendingActions[presentationBoundary...])
-    }
-}
-
 public enum SwitcherLoadingDisposition: Equatable, Sendable {
     case handleImmediately
     case queued
@@ -77,19 +56,18 @@ public struct SwitcherLoadingSession: Sendable {
         return .queued
     }
 
+    /// Returns the actions the gesture queued while loading, in order, or nil
+    /// when the load no longer belongs to the active gesture.
     public mutating func finishLoading(
         for gestureID: UInt64
-    ) -> SwitcherActionReplayPlan? {
+    ) -> [SwitcherAction]? {
         guard let activeGesture,
               activeGesture.gestureID == gestureID else {
             return nil
         }
 
-        let plan = SwitcherActionReplayPlan(
-            pendingActions: activeGesture.actions
-        )
         finishActiveLoading()
-        return plan
+        return activeGesture.actions
     }
 
     public mutating func takeNextGesture() -> SwitcherGestureActions? {

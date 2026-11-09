@@ -2,7 +2,7 @@ import XCTest
 @testable import RufCore
 
 final class SwitcherLoadingSessionTests: XCTestCase {
-    func testQueuesActionsWhileLoadingAndReturnsAReplayPlanOnCompletion() {
+    func testQueuesActionsWhileLoadingAndReturnsThemOnCompletion() {
         var session = SwitcherLoadingSession()
         session.beginLoading(for: 1)
 
@@ -15,13 +15,11 @@ final class SwitcherLoadingSessionTests: XCTestCase {
 
         XCTAssertEqual(
             session.finishLoading(for: 1),
-            SwitcherActionReplayPlan(
-                pendingActions: [
-                    .cycle(backwards: false),
-                    .move(.right),
-                    .openNewWindow,
-                ]
-            )
+            [
+                .cycle(backwards: false),
+                .move(.right),
+                .openNewWindow,
+            ]
         )
         XCTAssertFalse(session.isLoading)
     }
@@ -37,7 +35,7 @@ final class SwitcherLoadingSessionTests: XCTestCase {
         session.beginLoading(for: 1)
         XCTAssertEqual(
             session.finishLoading(for: 1),
-            SwitcherActionReplayPlan(pendingActions: [])
+            []
         )
     }
 
@@ -67,7 +65,7 @@ final class SwitcherLoadingSessionTests: XCTestCase {
 
         XCTAssertEqual(
             session.finishLoading(for: 1),
-            SwitcherActionReplayPlan(pendingActions: [.commit])
+            [.commit]
         )
         XCTAssertEqual(
             session.takeNextGesture(),
@@ -89,7 +87,7 @@ final class SwitcherLoadingSessionTests: XCTestCase {
         XCTAssertTrue(session.isLoading)
         XCTAssertEqual(
             session.finishLoading(for: 1),
-            SwitcherActionReplayPlan(pendingActions: [.commit])
+            [.commit]
         )
         XCTAssertNil(session.takeNextGesture())
     }
@@ -118,7 +116,7 @@ final class SwitcherLoadingSessionTests: XCTestCase {
         XCTAssertTrue(session.isLoading)
         XCTAssertEqual(
             session.finishLoading(for: 1),
-            SwitcherActionReplayPlan(pendingActions: [])
+            []
         )
     }
 
