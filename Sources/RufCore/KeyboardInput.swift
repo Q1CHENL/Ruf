@@ -55,6 +55,23 @@ public struct KeyboardInput: Sendable {
     }
 }
 
+extension KeyboardInput {
+    /// Whether this key press types `letter`. A layout that types ASCII
+    /// characters names the key by what it types, wherever the key sits, so
+    /// AZERTY's A key in the ANSI Q position is never Q. Only a layout without
+    /// ASCII characters on the key, such as Cyrillic, falls back to the key in
+    /// the letter's ANSI position.
+    func types(_ letter: String, ansiKeyCode: Int64) -> Bool {
+        guard let characters,
+              !characters.isEmpty,
+              characters.allSatisfy(\.isASCII) else {
+            return keyCode == ansiKeyCode
+        }
+
+        return characters.lowercased() == letter
+    }
+}
+
 public enum SwitcherAction: Equatable, Sendable {
     case cycle(backwards: Bool)
     case move(GridMove)
@@ -237,14 +254,12 @@ public struct KeyboardInputSession: Sendable {
         }
 
         if enabledShortcuts.contains(.openNewWindow),
-           input.keyCode == KeyboardKeyCode.ansiN
-            || input.characters?.lowercased() == "n" {
+           input.types("n", ansiKeyCode: KeyboardKeyCode.ansiN) {
             return .openNewWindow
         }
 
         if enabledShortcuts.contains(.quitApplication),
-           input.keyCode == KeyboardKeyCode.ansiQ
-            || input.characters?.lowercased() == "q" {
+           input.types("q", ansiKeyCode: KeyboardKeyCode.ansiQ) {
             return .quitApplication
         }
 
@@ -361,11 +376,9 @@ public struct KeyboardInputSession: Sendable {
             )
         }
 
-        let isResourceUsageKey = input.keyCode == KeyboardKeyCode.ansiI
-            || input.characters?.lowercased() == "i"
         if input.modifiers == [.command],
            !input.isRepeat,
-           isResourceUsageKey {
+           input.types("i", ansiKeyCode: KeyboardKeyCode.ansiI) {
             return KeyboardDecision(
                 command: switcherCommand(
                     .toggleApplicationResourceUsage

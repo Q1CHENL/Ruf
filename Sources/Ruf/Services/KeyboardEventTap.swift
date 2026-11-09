@@ -16,11 +16,11 @@ private func keyboardEventTapCallback(
     let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
     let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
     let modifiers = keyboardModifiers(from: flags)
+    // Switcher letter shortcuts follow the typed character, so every
+    // Command key press in an open switcher needs it.
     let shouldReadCharacters = type == .keyDown
         && !isRepeat
         && modifiers == [.command]
-        && keyCode != KeyboardKeyCode.ansiN
-        && keyCode != KeyboardKeyCode.ansiQ
         && MainActor.assumeIsolated { controller.isCycling }
     let characters = shouldReadCharacters ? keyboardCharacters(from: event) : nil
     let consumed = MainActor.assumeIsolated {

@@ -380,6 +380,83 @@ final class KeyboardInputSessionTests: XCTestCase {
         )
     }
 
+    func testQuitFollowsTheTypedQRatherThanTheANSIQPosition() {
+        // AZERTY types "a" and Dvorak types "'" on the ANSI Q key.
+        for characters in ["a", "'"] {
+            var session = cyclingSession()
+
+            XCTAssertEqual(
+                session.interpret(
+                    commandKeyInput(
+                        keyCode: KeyboardKeyCode.ansiQ,
+                        characters: characters
+                    ),
+                    capturesCommandTab: true
+                ),
+                KeyboardDecision(command: nil, isConsumed: true)
+            )
+            XCTAssertNil(session.pendingSwitcherGestureToken)
+            XCTAssertEqual(
+                session.interpret(
+                    commandReleaseInput(),
+                    capturesCommandTab: true
+                ),
+                switcherDecision(.commit, isConsumed: false)
+            )
+        }
+
+        // AZERTY types "q" on the ANSI A key.
+        XCTAssertEqual(
+            completedLetterGesture(keyCode: 0, characters: "q"),
+            switcherDecision(.quitApplication, isConsumed: false)
+        )
+    }
+
+    func testNewWindowFollowsTheTypedNRatherThanTheANSINPosition() {
+        // Dvorak types "b" on the ANSI N key and "n" on the ANSI L key.
+        var session = cyclingSession()
+
+        XCTAssertEqual(
+            session.interpret(
+                commandKeyInput(
+                    keyCode: KeyboardKeyCode.ansiN,
+                    characters: "b"
+                ),
+                capturesCommandTab: true
+            ),
+            KeyboardDecision(command: nil, isConsumed: true)
+        )
+        XCTAssertNil(session.pendingSwitcherGestureToken)
+
+        XCTAssertEqual(
+            completedLetterGesture(keyCode: 37, characters: "n"),
+            switcherDecision(.openNewWindow, isConsumed: false)
+        )
+    }
+
+    func testResourceUsageFollowsTheTypedIRatherThanTheANSIIPosition() {
+        // Dvorak types "c" on the ANSI I key and "i" on the ANSI G key.
+        var session = cyclingSession()
+
+        XCTAssertEqual(
+            session.interpret(
+                commandKeyInput(
+                    keyCode: KeyboardKeyCode.ansiI,
+                    characters: "c"
+                ),
+                capturesCommandTab: true
+            ),
+            KeyboardDecision(command: nil, isConsumed: true)
+        )
+        XCTAssertEqual(
+            session.interpret(
+                commandKeyInput(keyCode: 5, characters: "i"),
+                capturesCommandTab: true
+            ),
+            switcherDecision(.toggleApplicationResourceUsage)
+        )
+    }
+
     func testPendingNewWindowGestureSurvivesModifierChangesWhileCommandIsHeld() {
         var session = cyclingSession()
         _ = session.interpret(commandNInput(), capturesCommandTab: true)
@@ -983,6 +1060,45 @@ final class KeyboardInputSessionTests: XCTestCase {
             modifiers: [.command],
             isRepeat: isRepeat,
             characters: "q"
+        )
+    }
+
+    private func commandKeyInput(
+        keyCode: Int64,
+        characters: String?
+    ) -> KeyboardInput {
+        KeyboardInput(
+            kind: .keyDown,
+            keyCode: keyCode,
+            modifiers: [.command],
+            isRepeat: false,
+            characters: characters
+        )
+    }
+
+    /// Presses and releases a Command-letter chord in an open switcher and
+    /// returns the decision for the final Command release.
+    private func completedLetterGesture(
+        keyCode: Int64,
+        characters: String
+    ) -> KeyboardDecision {
+        var session = cyclingSession()
+        _ = session.interpret(
+            commandKeyInput(keyCode: keyCode, characters: characters),
+            capturesCommandTab: true
+        )
+        _ = session.interpret(
+            KeyboardInput(
+                kind: .keyUp,
+                keyCode: keyCode,
+                modifiers: [.command],
+                isRepeat: false
+            ),
+            capturesCommandTab: true
+        )
+        return session.interpret(
+            commandReleaseInput(),
+            capturesCommandTab: true
         )
     }
 
