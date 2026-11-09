@@ -263,7 +263,8 @@ final class KeyboardEventTap {
     }
 
     private func synchronizePendingGestureTimeout(previousToken: UInt64?) {
-        guard let token = inputSession.pendingSwitcherGestureToken else {
+        guard let token = inputSession.pendingSwitcherGestureToken,
+              let keyCode = inputSession.pendingSwitcherGestureKeyCode else {
             pendingGestureTimeoutTask?.cancel()
             pendingGestureTimeoutTask = nil
             return
@@ -277,24 +278,43 @@ final class KeyboardEventTap {
 
         pendingGestureTimeoutTask?.cancel()
         pendingGestureTimeoutTask = Task { @MainActor [weak self] in
-            do {
-                try await Task.sleep(for: Self.pendingGestureTimeout)
-            } catch {
-                return
-            }
+            while true {
+                do {
+                    try await Task.sleep(for: Self.pendingGestureTimeout)
+                } catch {
+                    return
+                }
 
-            guard let self,
-                  inputSession.pendingSwitcherGestureToken == token else {
-                return
-            }
+                guard let self,
+                      inputSession.pendingSwitcherGestureToken == token else {
+                    return
+                }
 
-            pendingGestureTimeoutTask = nil
-            if let command = inputSession.cancelPendingSwitcherGesture(
-                expectedToken: token
-            ) {
-                enqueue(command)
+                // The deadline recovers a release the tap never saw, such as
+                // one under Secure Input. While the keys are still down, the
+                // release is still coming.
+                if Self.isHeld(keyCode) {
+                    continue
+                }
+
+                pendingGestureTimeoutTask = nil
+                if let command = inputSession.cancelPendingSwitcherGesture(
+                    expectedToken: token
+                ) {
+                    enqueue(command)
+                }
+                return
             }
         }
+    }
+
+    /// Whether `keyCode` or Command is physically down right now.
+    private static func isHeld(_ keyCode: Int64) -> Bool {
+        CGEventSource.flagsState(.combinedSessionState).contains(.maskCommand)
+            || CGEventSource.keyState(
+                .combinedSessionState,
+                key: CGKeyCode(truncatingIfNeeded: keyCode)
+            )
     }
 
     private func enqueue(_ command: KeyboardCommand) {

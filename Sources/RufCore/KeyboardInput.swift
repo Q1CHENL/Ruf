@@ -151,6 +151,11 @@ public struct KeyboardInputSession: Sendable {
         pendingSwitcherGesture?.token
     }
 
+    /// The key whose release the pending terminal gesture waits for.
+    public var pendingSwitcherGestureKeyCode: Int64? {
+        pendingSwitcherGesture?.triggerKeyCode
+    }
+
     public init() {}
 
     public mutating func interpret(
