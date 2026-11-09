@@ -76,7 +76,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         enableLaunchAtLoginByDefaultIfNeeded()
         installStatusItem()
-        panelController.prepare(itemCount: 0)
+        panelController.prepare()
         applyPreferences()
         softwareUpdateController.startUpdater()
     }
@@ -211,10 +211,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
 
+        // The grid's shape depends on the screen it will appear on, and
+        // replayed moves below already navigate that grid.
+        let screen = PresentationScreen.resolve(
+            for: NSWorkspace.shared.frontmostApplication
+        )
         let beginSpan = PerformanceLog.begin("switcher.begin")
         model.begin(
             with: targets,
             currentApplicationIdentifier: snapshot.currentApplicationIdentifier,
+            maximumRowCount: screen.map {
+                SwitcherMetrics.maximumRowCount(
+                    fittingHeight: $0.visibleFrame.height
+                )
+            } ?? .max,
             backwards: backwards,
             showsApplicationResourceUsage:
                 preferences.showsApplicationResourceUsage
@@ -234,7 +244,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
 
-        panelController.show(itemCount: targets.count)
+        panelController.show(on: screen)
         synchronizeApplicationResourceUsage()
         endOpenSpan("targets=\(targets.count)")
     }

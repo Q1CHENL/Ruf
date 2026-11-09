@@ -11,13 +11,13 @@ struct SwitcherResourceCalloutPlacement: Equatable {
 
     static func resolve(
         selectedIndex: Int,
-        itemCount: Int,
+        navigation: GridNavigation,
         panelFrame: CGRect,
         visibleFrame: CGRect
     ) -> Self? {
         guard let cellFrame = cellFrame(
             selectedIndex: selectedIndex,
-            itemCount: itemCount,
+            navigation: navigation,
             panelFrame: panelFrame
         ), visibleFrame.width >= SwitcherResourceCalloutMetrics.size.width,
            visibleFrame.height >= SwitcherResourceCalloutMetrics.size.height
@@ -43,11 +43,10 @@ struct SwitcherResourceCalloutPlacement: Equatable {
 
     static func cellFrame(
         selectedIndex: Int,
-        itemCount: Int,
+        navigation: GridNavigation,
         panelFrame: CGRect
     ) -> CGRect? {
-        let navigation = GridNavigation(itemCount: itemCount)
-        guard (0..<itemCount).contains(selectedIndex),
+        guard (0..<navigation.itemCount).contains(selectedIndex),
               navigation.columnCount > 0 else {
             return nil
         }

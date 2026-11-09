@@ -75,24 +75,26 @@ final class SwitcherPanelController {
         panel.isVisible
     }
 
-    func prepare(itemCount: Int) {
-        resize(itemCount: itemCount)
+    func prepare() {
+        resize(for: model.navigation)
         glassView.layoutSubtreeIfNeeded()
     }
 
-    func show(itemCount: Int) {
+    /// Shows the model's current grid centred on `screen`, which should be
+    /// the screen whose visible height bounded the grid's rows.
+    func show(on screen: NSScreen?) {
         previouslyActiveApplication = NSWorkspace.shared.frontmostApplication
+        let navigation = model.navigation
+        let itemCount = navigation.itemCount
 
         // Resizing forces the hosting view to lay the grid out, so the first
         // SwiftUI evaluation of a new target list lands here rather than in
         // the ordering call below.
         let resizeSpan = PerformanceLog.begin("panel.resize")
-        let size = resize(itemCount: itemCount)
+        let size = resize(for: navigation)
         PerformanceLog.end(resizeSpan, "items=\(itemCount)")
 
         let originSpan = PerformanceLog.begin("panel.origin")
-        let screen = presentationScreen(for: previouslyActiveApplication)
-
         if let visibleFrame = screen?.visibleFrame {
             panel.setFrameOrigin(
                 CGPoint(
@@ -141,7 +143,7 @@ final class SwitcherPanelController {
                 }),
               let placement = SwitcherResourceCalloutPlacement.resolve(
                   selectedIndex: selectedIndex,
-                  itemCount: model.targets.count,
+                  navigation: model.navigation,
                   panelFrame: panel.frame,
                   visibleFrame: screen.visibleFrame
               ) else {
@@ -152,38 +154,10 @@ final class SwitcherPanelController {
         return applicationResourceUsageCallout.show(placement, parent: panel)
     }
 
-    /// The screen showing the focused application's frontmost window, or the
-    /// screen under the pointer when that application shows no window.
-    private func presentationScreen(
-        for application: NSRunningApplication?
-    ) -> NSScreen? {
-        let screens = NSScreen.screens
-        if let application,
-           let windowFrame = WindowServerDescriptionReader.frontmostWindowFrame(
-               ownedBy: application.processIdentifier
-           ) {
-            // WindowServer frames share the displays' top-left-origin space.
-            let displays = screens.map(
-                GlobalScreenCoordinates.displayGeometry(of:)
-            )
-            if let display = WindowMovementPlanner.sourceDisplay(
-                for: windowFrame,
-                displays: displays
-            ), let index = displays.firstIndex(of: display) {
-                return screens[index]
-            }
-        }
-
-        let mouseLocation = NSEvent.mouseLocation
-        return screens.first { $0.frame.contains(mouseLocation) }
-            ?? NSScreen.main
-            ?? screens.first
-    }
-
     @discardableResult
-    private func resize(itemCount: Int) -> CGSize {
+    private func resize(for navigation: GridNavigation) -> CGSize {
         let metricsSpan = PerformanceLog.begin("panel.metrics")
-        let size = SwitcherMetrics.panelSize(itemCount: itemCount)
+        let size = SwitcherMetrics.panelSize(for: navigation)
         PerformanceLog.end(metricsSpan)
 
         let contentSizeSpan = PerformanceLog.begin("panel.setContentSize")

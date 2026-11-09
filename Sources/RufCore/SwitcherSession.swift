@@ -1,16 +1,17 @@
 public struct SwitcherSession: Equatable, Sendable {
-    public private(set) var itemCount = 0
+    /// The grid every presentation of this session lays out and navigates.
+    public private(set) var navigation = GridNavigation(itemCount: 0)
     public private(set) var selectedIndex: Int?
     public private(set) var showsApplicationResourceUsage = false
 
     public init() {}
 
-    public var isPresented: Bool {
-        selectedIndex != nil
+    public var itemCount: Int {
+        navigation.itemCount
     }
 
-    public var navigation: GridNavigation {
-        GridNavigation(itemCount: itemCount)
+    public var isPresented: Bool {
+        selectedIndex != nil
     }
 
     /// Starts a session whose first selection skips `currentGroup`, the
@@ -21,6 +22,7 @@ public struct SwitcherSession: Equatable, Sendable {
         groupIdentifiers: [Group],
         currentGroup: Group?,
         initialSelectionTargetCount: Int? = nil,
+        maximumRowCount: Int = .max,
         backwards: Bool,
         showsApplicationResourceUsage: Bool = false
     ) {
@@ -29,7 +31,10 @@ public struct SwitcherSession: Equatable, Sendable {
             return
         }
 
-        itemCount = groupIdentifiers.count
+        navigation = GridNavigation(
+            itemCount: groupIdentifiers.count,
+            maximumRowCount: maximumRowCount
+        )
         self.showsApplicationResourceUsage =
             showsApplicationResourceUsage
         let resolvedInitialTargetCount = min(
@@ -90,7 +95,7 @@ public struct SwitcherSession: Equatable, Sendable {
     }
 
     private mutating func clear() {
-        itemCount = 0
+        navigation = GridNavigation(itemCount: 0)
         selectedIndex = nil
         showsApplicationResourceUsage = false
     }

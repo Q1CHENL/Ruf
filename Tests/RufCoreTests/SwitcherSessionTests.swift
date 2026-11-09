@@ -145,6 +145,22 @@ final class SwitcherSessionTests: XCTestCase {
         XCTAssertNil(session.selectedIndex)
     }
 
+    func testNavigationUsesTheColumnsThatFitTheRowLimit() {
+        var session = SwitcherSession()
+        session.begin(
+            groupIdentifiers: Array(0..<12),
+            currentGroup: 99,
+            maximumRowCount: 2,
+            backwards: false
+        )
+
+        XCTAssertEqual(session.navigation.columnCount, 6)
+        XCTAssertEqual(session.selectedIndex, 0)
+
+        session.move(.down)
+        XCTAssertEqual(session.selectedIndex, 6)
+    }
+
     func testResourceUsageVisibilityCanSeedTheNextSession() {
         var session = SwitcherSession()
 

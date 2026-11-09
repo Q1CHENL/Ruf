@@ -16,6 +16,10 @@ final class SwitcherModel {
         session.selectedIndex
     }
 
+    var navigation: GridNavigation {
+        session.navigation
+    }
+
     var isPresented: Bool {
         session.isPresented
     }
@@ -44,6 +48,7 @@ final class SwitcherModel {
     func begin(
         with targets: [SwitchTarget],
         currentApplicationIdentifier: String?,
+        maximumRowCount: Int,
         backwards: Bool,
         showsApplicationResourceUsage: Bool
     ) {
@@ -56,6 +61,7 @@ final class SwitcherModel {
             groupIdentifiers: targets.map(\.item.applicationIdentifier),
             currentGroup: currentApplicationIdentifier,
             initialSelectionTargetCount: initialSelectionTargetCount,
+            maximumRowCount: maximumRowCount,
             backwards: backwards,
             showsApplicationResourceUsage: showsApplicationResourceUsage
         )

@@ -9,23 +9,35 @@ public enum GridMove: Equatable, Sendable {
     case down
 }
 
-public struct GridNavigation: Sendable {
+public struct GridNavigation: Equatable, Sendable {
     public let itemCount: Int
+    public let columnCount: Int
 
-    public init(itemCount: Int) {
+    /// Lays the items out in a near-square grid, widening it only as much as
+    /// needed to keep within `maximumRowCount` rows.
+    public init(itemCount: Int, maximumRowCount: Int = .max) {
         self.itemCount = max(0, itemCount)
+        columnCount = Self.columnCount(
+            itemCount: self.itemCount,
+            maximumRowCount: max(1, maximumRowCount)
+        )
     }
 
-    public var columnCount: Int {
+    private static func columnCount(
+        itemCount: Int,
+        maximumRowCount: Int
+    ) -> Int {
         guard itemCount > 0 else {
             return 0
         }
 
-        var columns = 1
-        while columns * columns < itemCount {
-            columns += 1
+        var nearSquareColumns = 1
+        while nearSquareColumns * nearSquareColumns < itemCount {
+            nearSquareColumns += 1
         }
-        return columns
+        let fittingColumns = itemCount / maximumRowCount
+            + (itemCount % maximumRowCount == 0 ? 0 : 1)
+        return max(nearSquareColumns, fittingColumns)
     }
 
     public var rowCount: Int {

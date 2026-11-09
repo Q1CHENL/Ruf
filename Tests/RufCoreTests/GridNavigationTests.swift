@@ -13,6 +13,60 @@ final class GridNavigationTests: XCTestCase {
         XCTAssertEqual(GridNavigation(itemCount: 7).rowCount, 3)
     }
 
+    func testKeepsTheNearSquareGridWhenItsRowsFit() {
+        XCTAssertEqual(
+            GridNavigation(itemCount: 20, maximumRowCount: 5).columnCount,
+            5
+        )
+        XCTAssertEqual(
+            GridNavigation(itemCount: 20, maximumRowCount: 4).columnCount,
+            5
+        )
+        XCTAssertEqual(
+            GridNavigation(itemCount: 7, maximumRowCount: 3).columnCount,
+            3
+        )
+    }
+
+    func testAddsColumnsUntilTheRowsFit() {
+        // A near-square grid of 111 items needs 11 rows.
+        let navigation = GridNavigation(itemCount: 111, maximumRowCount: 10)
+
+        XCTAssertEqual(navigation.columnCount, 12)
+        XCTAssertEqual(navigation.rowCount, 10)
+
+        let tighterNavigation = GridNavigation(
+            itemCount: 20,
+            maximumRowCount: 3
+        )
+
+        XCTAssertEqual(tighterNavigation.columnCount, 7)
+        XCTAssertEqual(tighterNavigation.rowCount, 3)
+    }
+
+    func testUsesASingleRowWhenNoMoreFit() {
+        XCTAssertEqual(
+            GridNavigation(itemCount: 6, maximumRowCount: 1).columnCount,
+            6
+        )
+        XCTAssertEqual(
+            GridNavigation(itemCount: 6, maximumRowCount: 0).columnCount,
+            6
+        )
+        XCTAssertEqual(
+            GridNavigation(itemCount: 0, maximumRowCount: 1).columnCount,
+            0
+        )
+    }
+
+    func testVerticalMovesFollowAWidenedGrid() {
+        let navigation = GridNavigation(itemCount: 12, maximumRowCount: 2)
+
+        XCTAssertEqual(navigation.columnCount, 6)
+        XCTAssertEqual(navigation.moving(from: 1, .down), 7)
+        XCTAssertEqual(navigation.moving(from: 8, .up), 2)
+    }
+
     func testForwardAndBackwardWrapAcrossTheWholeGrid() {
         let navigation = GridNavigation(itemCount: 7)
 

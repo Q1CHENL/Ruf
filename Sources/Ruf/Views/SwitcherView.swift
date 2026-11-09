@@ -39,8 +39,19 @@ enum SwitcherMetrics {
     static let topInset = plateEdgeInset - plateTopInCell
     static let horizontalInset = plateEdgeInset - plateSideInCell
 
-    static func panelSize(itemCount: Int) -> CGSize {
-        let navigation = GridNavigation(itemCount: itemCount)
+    /// The most rows whose panel fits within `height`, at least one.
+    static func maximumRowCount(fittingHeight height: CGFloat) -> Int {
+        // A panel of n rows is n pitches tall, less the spacing below the
+        // last row, plus the top inset.
+        let rows = (height + verticalSpacing - topInset) / gridPitch
+        guard rows.isFinite else {
+            return .max
+        }
+
+        return max(1, Int(rows.rounded(.down)))
+    }
+
+    static func panelSize(for navigation: GridNavigation) -> CGSize {
         let columns = max(1, navigation.columnCount)
         let rows = max(1, navigation.rowCount)
 
@@ -64,7 +75,7 @@ struct SwitcherView: View {
         // Derive indices from the same snapshot captured by the row closures.
         let targets = model.targets
         let selectedIndex = model.selectedIndex
-        let navigation = GridNavigation(itemCount: targets.count)
+        let navigation = model.navigation
 
         VStack(spacing: SwitcherMetrics.verticalSpacing) {
             ForEach(0..<navigation.rowCount, id: \.self) { row in
