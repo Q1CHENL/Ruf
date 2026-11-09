@@ -143,6 +143,21 @@ final class AppPreferencesTests: XCTestCase {
     }
 
     @MainActor
+    func testStartupRepairsAStoredSystemSwitcherWithAHiddenMenuBarItem() {
+        let suiteName = "AppPreferencesTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set("system", forKey: "switcherMode")
+        defaults.set(false, forKey: "showsMenuBarItem")
+
+        let preferences = AppPreferences(defaults: defaults)
+
+        XCTAssertEqual(preferences.switcherMode, .system)
+        XCTAssertTrue(preferences.showsMenuBarItem)
+        XCTAssertEqual(defaults.object(forKey: "showsMenuBarItem") as? Bool, true)
+    }
+
+    @MainActor
     func testLaunchAtLoginIsEnabledByDefaultOnlyUntilConfigured() {
         let suiteName = "AppPreferencesTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
