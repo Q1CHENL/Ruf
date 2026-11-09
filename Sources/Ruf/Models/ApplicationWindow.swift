@@ -11,9 +11,3 @@ struct ApplicationWindow: @unchecked Sendable {
     let title: String?
     let isMinimized: Bool
 }
-
-enum ApplicationWindowState: Sendable {
-    case singleWindow(ApplicationWindow)
-    case windowless
-    case windows([ApplicationWindow])
-}

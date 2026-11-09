@@ -7,7 +7,7 @@ import XCTest
 final class ApplicationWindowSnapshotTests: XCTestCase {
     func testAccessoryApplicationsWithoutConfirmedAXWindowsAreExcluded() {
         let snapshot = ApplicationWindowService.Snapshot(
-            states: [30: .windowless]
+            resolutions: [30: .windowless]
         )
 
         XCTAssertFalse(snapshot.includesApplication(20, policy: .windowsOnly))
@@ -21,7 +21,7 @@ final class ApplicationWindowSnapshotTests: XCTestCase {
             isMinimized: false
         )
         let snapshot = ApplicationWindowService.Snapshot(
-            states: [20: .singleWindow(window)]
+            resolutions: [20: .singleWindow(window)]
         )
 
         XCTAssertTrue(snapshot.includesApplication(20, policy: .windowsOnly))
@@ -34,7 +34,7 @@ final class ApplicationWindowSnapshotTests: XCTestCase {
             isMinimized: true
         )
         let snapshot = ApplicationWindowService.Snapshot(
-            states: [20: .windows([window]), 30: .windowless]
+            resolutions: [20: .windows([window]), 30: .windowless]
         )
 
         XCTAssertTrue(snapshot.includesApplication(20, policy: .windowsOnly))
@@ -42,7 +42,7 @@ final class ApplicationWindowSnapshotTests: XCTestCase {
     }
 
     func testUnavailableWindowInventoryKeepsOnlyRegularApplications() {
-        let snapshot = ApplicationWindowService.Snapshot(states: [:])
+        let snapshot = ApplicationWindowService.Snapshot(resolutions: [:])
 
         XCTAssertTrue(snapshot.includesApplication(20, policy: .regular))
         XCTAssertFalse(snapshot.includesApplication(30, policy: .windowsOnly))

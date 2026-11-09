@@ -88,39 +88,21 @@ final class ApplicationCatalog: NSObject {
                 dockBadges[$0.standardizedFileURL]
             }
 
-            switch windowSnapshot.states[item.application.processIdentifier] {
-            case let .singleWindow(window)?:
-                return [
-                    SwitchTarget(
-                        item: item,
-                        kind: .applicationWindow(window),
-                        dockBadge: dockBadge
-                    ),
-                ]
-            case .windowless?:
-                return [
-                    SwitchTarget(
-                        item: item,
-                        kind: .reopenApplication,
-                        dockBadge: dockBadge
-                    ),
-                ]
-            case let .windows(windows)?:
-                return windows.map { window in
-                    SwitchTarget(
-                        item: item,
-                        kind: .window(window),
-                        dockBadge: dockBadge
-                    )
-                }
-            case nil:
-                return [
-                    SwitchTarget(
-                        item: item,
-                        kind: .application,
-                        dockBadge: dockBadge
-                    ),
-                ]
+            let kinds: [SwitchTargetKind]
+            switch windowSnapshot.resolution(
+                for: item.application.processIdentifier
+            ) {
+            case .application:
+                kinds = [.application]
+            case let .singleWindow(window):
+                kinds = [.applicationWindow(window)]
+            case .windowless:
+                kinds = [.reopenApplication]
+            case let .windows(windows):
+                kinds = windows.map(SwitchTargetKind.window)
+            }
+            return kinds.map { kind in
+                SwitchTarget(item: item, kind: kind, dockBadge: dockBadge)
             }
         }
 

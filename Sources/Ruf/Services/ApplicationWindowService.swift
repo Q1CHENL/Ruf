@@ -11,34 +11,35 @@ enum ApplicationWindowService {
     }
 
     struct Snapshot: Sendable {
-        let states: [pid_t: ApplicationWindowState]
+        let resolutions: [pid_t: ApplicationWindowResolution<ApplicationWindow>]
+
+        /// An application whose query never ran or did not finish is offered
+        /// as a whole.
+        func resolution(
+            for processIdentifier: pid_t
+        ) -> ApplicationWindowResolution<ApplicationWindow> {
+            resolutions[processIdentifier] ?? .application
+        }
 
         func includesApplication(
             _ processIdentifier: pid_t,
             policy: ApplicationDiscoveryPolicy
         ) -> Bool {
-            let hasSwitchableWindows: Bool
-            switch states[processIdentifier] {
-            case .singleWindow?, .windows?:
-                hasSwitchableWindows = true
-            case .windowless?, nil:
-                hasSwitchableWindows = false
-            }
-            return policy.shouldInclude(
-                hasSwitchableWindows: hasSwitchableWindows
+            policy.shouldInclude(
+                hasSwitchableWindows: resolution(for: processIdentifier)
+                    .hasSwitchableWindows
             )
         }
     }
 
-    private struct ApplicationWindowsQuery: Sendable {
-        let hasSwitchableAXWindows: Bool
-        let hasIncompleteWindowReads: Bool
-        let windows: [ApplicationWindow]
+    private struct ApplicationWindowsQuery {
+        let observations: [ApplicationWindowObservation<ApplicationWindow>]
+        let hasUnreadWindows: Bool
     }
 
-    private struct WindowStateQueryResult: Sendable {
+    private struct WindowResolutionQueryResult: Sendable {
         let processIdentifier: pid_t
-        let state: ApplicationWindowState?
+        let resolution: ApplicationWindowResolution<ApplicationWindow>
     }
 
     private static let messageTimeout: Float = 0.075
@@ -119,7 +120,7 @@ enum ApplicationWindowService {
         for candidates: [Candidate]
     ) async -> Snapshot {
         guard !Task.isCancelled else {
-            return Snapshot(states: [:])
+            return Snapshot(resolutions: [:])
         }
 
         let windowListSpan = PerformanceLog.begin("ax.windowList")
@@ -127,10 +128,10 @@ enum ApplicationWindowService {
         PerformanceLog.end(windowListSpan)
 
         guard let plan else {
-            return Snapshot(states: [:])
+            return Snapshot(resolutions: [:])
         }
         guard AccessibilityPermission.isGranted else {
-            return Snapshot(states: [:])
+            return Snapshot(resolutions: [:])
         }
 
         // Preserve the budget for regular apps and visible accessory windows;
@@ -162,8 +163,8 @@ enum ApplicationWindowService {
 
         let querySpan = PerformanceLog.begin("ax.queryStates")
         let deadline = DispatchTime.now() + totalQueryBudget
-        let queryCandidate: @Sendable (Candidate) -> WindowStateQueryResult = { candidate in
-            queryState(
+        let queryCandidate: @Sendable (Candidate) -> WindowResolutionQueryResult = { candidate in
+            queryResolution(
                 for: candidate.processIdentifier,
                 isApplicationHidden: candidate.isHidden,
                 otherSpaceWindowEvidence: OtherSpaceWindowEvidence(
@@ -176,8 +177,8 @@ enum ApplicationWindowService {
             )
         }
 
-        let states = await withTaskGroup(
-            of: WindowStateQueryResult.self
+        let resolutions = await withTaskGroup(
+            of: WindowResolutionQueryResult.self
         ) { group in
             var candidates = queryCandidates.makeIterator()
             var dispatchedCount = 0
@@ -198,7 +199,8 @@ enum ApplicationWindowService {
                 }
             }
 
-            var states: [pid_t: ApplicationWindowState] = [:]
+            var resolutions: [pid_t: ApplicationWindowResolution<ApplicationWindow>] = [:]
+            var resolvedCount = 0
 
             while let result = await group.next() {
                 guard !Task.isCancelled else {
@@ -206,8 +208,12 @@ enum ApplicationWindowService {
                     continue
                 }
 
-                if let state = result.state {
-                    states[result.processIdentifier] = state
+                resolutions[result.processIdentifier] = result.resolution
+                switch result.resolution {
+                case .application:
+                    break
+                case .singleWindow, .windowless, .windows:
+                    resolvedCount += 1
                 }
 
                 guard DispatchTime.now() < deadline,
@@ -221,29 +227,29 @@ enum ApplicationWindowService {
                 }
             }
 
-            // A candidate that was never dispatched, or that resolved to no
-            // state, is an application the switcher silently degrades to an
+            // A candidate that was never dispatched, or that resolved to the
+            // application, is one the switcher silently degrades to an
             // app-level tile. That ratio is the signal the budget is too tight,
             // not the elapsed time on its own.
             PerformanceLog.end(
                 querySpan,
                 "candidates=\(queryCandidates.count) "
                     + "dispatched=\(dispatchedCount) "
-                    + "resolved=\(states.count) "
+                    + "resolved=\(resolvedCount) "
                     + "budgetExpired=\(DispatchTime.now() >= deadline)"
             )
-            return states
+            return resolutions
         }
-        return Snapshot(states: states)
+        return Snapshot(resolutions: resolutions)
     }
 
-    private static func queryState(
+    private static func queryResolution(
         for processIdentifier: pid_t,
         isApplicationHidden: Bool,
         otherSpaceWindowEvidence: OtherSpaceWindowEvidence,
         plan: WindowQueryPlan,
         deadline: DispatchTime
-    ) -> WindowStateQueryResult {
+    ) -> WindowResolutionQueryResult {
         guard !Task.isCancelled,
               DispatchTime.now() < deadline,
               let query = windows(
@@ -251,40 +257,23 @@ enum ApplicationWindowService {
                   plan: plan,
                   deadline: deadline
               ) else {
-            return WindowStateQueryResult(
+            return WindowResolutionQueryResult(
                 processIdentifier: processIdentifier,
-                state: nil
+                resolution: .application
             )
         }
 
-        let disposition = WindowQueryDisposition.resolve(
-            hasSwitchableAXWindows: query.hasSwitchableAXWindows,
-            hasVisibleWindows: plan.hasVisibleWindows(
-                for: processIdentifier
-            ),
-            isApplicationHidden: isApplicationHidden,
-            hasIncompleteWindowReads: query.hasIncompleteWindowReads,
-            otherSpaceWindowEvidence: otherSpaceWindowEvidence,
-            switchableWindowMinimizedStates: query.windows.map(\.isMinimized)
-        )
-        let state: ApplicationWindowState?
-
-        switch disposition {
-        case .application:
-            state = nil
-        case .singleWindow:
-            state = query.windows.first.map(
-                ApplicationWindowState.singleWindow
-            )
-        case .windowless:
-            state = .windowless
-        case .windows:
-            state = .windows(query.windows)
-        }
-
-        return WindowStateQueryResult(
+        return WindowResolutionQueryResult(
             processIdentifier: processIdentifier,
-            state: state
+            resolution: .resolve(
+                query.observations,
+                hasUnreadWindows: query.hasUnreadWindows,
+                hasVisibleWindows: plan.hasVisibleWindows(
+                    for: processIdentifier
+                ),
+                isApplicationHidden: isApplicationHidden,
+                otherSpaceWindowEvidence: otherSpaceWindowEvidence
+            )
         )
     }
 
@@ -355,15 +344,14 @@ enum ApplicationWindowService {
         let focusedWindow: AXUIElement? = AXElementReader.decoded(
             applicationValues[1]
         )
-        var windows: [ApplicationWindow] = []
-        var hasSwitchableAXWindows = false
-        var hasIncompleteWindowReads = false
+        var observations: [ApplicationWindowObservation<ApplicationWindow>] = []
+        var hasUnreadWindows = false
         for element in elements {
             guard !Task.isCancelled,
                   DispatchTime.now() < deadline else {
                 // The budget expired mid-scan, so the windows left unread stay
                 // unaccounted for rather than counting as absent.
-                hasIncompleteWindowReads = true
+                hasUnreadWindows = true
                 break
             }
 
@@ -376,28 +364,19 @@ enum ApplicationWindowService {
                 ],
                 from: element
             ) else {
-                hasIncompleteWindowReads = true
+                hasUnreadWindows = true
                 continue
             }
 
             if AXElementReader.containsTransientError(in: windowValues) {
-                hasIncompleteWindowReads = true
+                hasUnreadWindows = true
             }
 
             let subrole: String? = AXElementReader.decoded(windowValues[0])
             let isMinimized: Bool = AXElementReader.decoded(windowValues[1]) ?? false
             let title: String? = AXElementReader.decoded(windowValues[2])
-            guard
-                let subrole,
-                subrole == kAXStandardWindowSubrole
-                    || subrole == kAXDialogSubrole
-            else {
-                continue
-            }
-
-            // The subrole already establishes this is a window the user can be
-            // switched to. Its title only decides what the cell reads.
-            hasSwitchableAXWindows = true
+            let isSwitchable = subrole == kAXStandardWindowSubrole
+                || subrole == kAXDialogSubrole
             let trimmedTitle = title?.trimmingCharacters(
                 in: .whitespacesAndNewlines
             )
@@ -405,37 +384,34 @@ enum ApplicationWindowService {
                 ? trimmedTitle
                 : nil
 
-            let windowIdentifier = isMinimized
-                ? nil
-                : AXWindowIdentifierResolver.identifier(for: element)
-            guard plan.shouldIncludeWindow(
-                identifier: windowIdentifier,
-                processIdentifier: processIdentifier,
-                isMinimized: isMinimized
-            ) else {
-                continue
-            }
-
-            windows.append(
-                ApplicationWindow(
-                    element: element,
-                    title: displayTitle,
-                    isMinimized: isMinimized
+            // Only a switchable window that is not minimized is worth the
+            // identifier lookup; nothing else depends on its visibility.
+            let windowIdentifier = isSwitchable && !isMinimized
+                ? AXWindowIdentifierResolver.identifier(for: element)
+                : nil
+            observations.append(
+                ApplicationWindowObservation(
+                    window: ApplicationWindow(
+                        element: element,
+                        title: displayTitle,
+                        isMinimized: isMinimized
+                    ),
+                    isSwitchable: isSwitchable,
+                    isMinimized: isMinimized,
+                    isFocused: focusedWindow.map {
+                        CFEqual($0, element)
+                    } ?? false,
+                    visibility: plan.visibility(
+                        ofWindow: windowIdentifier,
+                        ownedBy: processIdentifier
+                    )
                 )
             )
         }
 
-        if let focusedWindow,
-           let focusedIndex = windows.firstIndex(where: {
-               CFEqual($0.element, focusedWindow)
-           }) {
-            windows.insert(windows.remove(at: focusedIndex), at: 0)
-        }
-
         return ApplicationWindowsQuery(
-            hasSwitchableAXWindows: hasSwitchableAXWindows,
-            hasIncompleteWindowReads: hasIncompleteWindowReads,
-            windows: windows
+            observations: observations,
+            hasUnreadWindows: hasUnreadWindows
         )
     }
 
