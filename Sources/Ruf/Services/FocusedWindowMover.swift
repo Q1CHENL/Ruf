@@ -56,6 +56,16 @@ final class FocusedWindowMover: NSObject {
         UInt64
     >()
 
+    override init() {
+        super.init()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(screenParametersDidChange(_:)),
+            name: NSApplication.didChangeScreenParametersNotification,
+            object: nil
+        )
+    }
+
     func move(
         _ direction: WindowMoveDirection,
         style: WindowMovementStyle
@@ -64,11 +74,8 @@ final class FocusedWindowMover: NSObject {
             return
         }
 
-        let displays = NSScreen.screens.map(
-            GlobalScreenCoordinates.displayGeometry(of:)
-        )
+        let displays = currentDisplays()
         guard displays.count > 1 else {
-            apply(session.displaysDidChange(displays))
             return
         }
 
@@ -95,6 +102,18 @@ final class FocusedWindowMover: NSObject {
 
     func stop() {
         apply(session.shutDown(), synchronously: true)
+    }
+
+    /// An animation headed for a display that was removed or rearranged
+    /// stops where it is, so neither its placement nor its Ghost outline
+    /// outlives the display.
+    @objc
+    private func screenParametersDidChange(_ notification: Notification) {
+        apply(session.displaysDidChange(currentDisplays()))
+    }
+
+    private func currentDisplays() -> [DisplayGeometry] {
+        NSScreen.screens.map(GlobalScreenCoordinates.displayGeometry(of:))
     }
 
     private func apply(

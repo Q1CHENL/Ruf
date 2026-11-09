@@ -457,6 +457,30 @@ final class WindowMovementSessionTests: XCTestCase {
         XCTAssertNil(session.animatingDisplay)
     }
 
+    func testRearrangingTheDestinationDropsAPlacementNotYetWritten() throws {
+        var session = Session()
+        _ = move(&session, .right, reducesMotion: true, from: window)
+        let animation = try XCTUnwrap(session.animation)
+        let movedMiddle = DisplayGeometry(
+            frame: middle.frame.offsetBy(dx: 0, dy: 200),
+            visibleFrame: middle.visibleFrame.offsetBy(dx: 0, dy: 200)
+        )
+
+        XCTAssertEqual(
+            session.displaysDidChange([left, movedMiddle, right]),
+            [.discardPendingWrites(animationIdentifier: animation.identifier)]
+        )
+        XCTAssertNil(session.animation)
+        XCTAssertEqual(
+            session.writeDidFinish(
+                .finalPlacement,
+                animationIdentifier: animation.identifier,
+                succeeded: true
+            ),
+            []
+        )
+    }
+
     func testMoveAfterTheDestinationDisappearedDoesNotSettleIt() throws {
         var session = Session()
         _ = move(&session, .right, from: window)
