@@ -13,7 +13,11 @@ final class ApplicationCatalog: NSObject {
     private static let recentApplicationsKey = "recentApplicationBundleIdentifiers"
 
     private let workspace = NSWorkspace.shared
-    private var recentApplications: RecentApplicationList
+    private var recentApplications: RecentApplicationList<String>
+    /// The order the user last activated processes in, which orders the
+    /// instances of one application. Process identifiers do not outlive the
+    /// processes, so this is not persisted.
+    private var recentProcesses = RecentApplicationList<pid_t>()
     /// An application Ruf asked to activate that macOS has not reported
     /// active yet. Activation is asynchronous, so until then this
     /// application, not the one still frontmost, is current.
@@ -59,39 +63,36 @@ final class ApplicationCatalog: NSObject {
         }
 
         let applicationSpan = PerformanceLog.begin("catalog.applications")
-        let applications = applicationSnapshot()
-        PerformanceLog.end(applicationSpan, "apps=\(applications.count)")
+        let instances = applicationInstances()
+        PerformanceLog.end(applicationSpan, "apps=\(instances.count)")
 
-        async let windowSnapshotQuery = ApplicationWindowService.snapshot(
-            for: applications.map {
-                ApplicationWindowService.Candidate(
-                    processIdentifier: $0.application.processIdentifier,
-                    policy: $0.discoveryPolicy,
-                    isHidden: $0.application.isHidden
-                )
-            }
+        let candidates = instances.map {
+            ApplicationWindowService.Candidate(
+                processIdentifier: $0.processIdentifier,
+                policy: $0.policy,
+                isHidden: $0.item.application.isHidden
+            )
+        }
+        async let resolutionsQuery = ApplicationWindowService.resolutions(
+            for: candidates
         )
         async let dockBadgesQuery = DockBadgeService.badges()
-        let (windowSnapshot, dockBadges) = await (
-            windowSnapshotQuery,
+        let (resolutions, dockBadges) = await (
+            resolutionsQuery,
             dockBadgesQuery
         )
 
-        var targets = applications.flatMap { item -> [SwitchTarget] in
-            guard windowSnapshot.includesApplication(
-                item.application.processIdentifier,
-                policy: item.discoveryPolicy
-            ) else {
-                return []
-            }
+        var targets = ApplicationTargetPlan.offers(
+            for: instances,
+            resolutions: resolutions
+        ).flatMap { offer -> [SwitchTarget] in
+            let item = offer.item
             let dockBadge = item.application.bundleURL.flatMap {
                 dockBadges[$0.standardizedFileURL]
             }
 
             let kinds: [SwitchTargetKind]
-            switch windowSnapshot.resolution(
-                for: item.application.processIdentifier
-            ) {
+            switch offer.resolution {
             case .application:
                 kinds = [.application]
             case let .singleWindow(window):
@@ -115,7 +116,7 @@ final class ApplicationCatalog: NSObject {
 
         PerformanceLog.end(
             snapshotSpan,
-            "apps=\(applications.count) badges=\(dockBadges.count) "
+            "apps=\(instances.count) badges=\(dockBadges.count) "
                 + "targets=\(targets.count)"
         )
         return Snapshot(
@@ -152,7 +153,6 @@ final class ApplicationCatalog: NSObject {
         return SwitchTarget(
             item: ApplicationItem(
                 application: application,
-                discoveryPolicy: .excluded,
                 bundleIdentifier: bundleIdentifier,
                 name: name,
                 icon: icon
@@ -164,15 +164,16 @@ final class ApplicationCatalog: NSObject {
         )
     }
 
-    private func applicationSnapshot() -> [ApplicationItem] {
+    /// Every process the switcher may offer, in switcher order. Instances of
+    /// one application are kept apart so each one's windows stay reachable.
+    private func applicationInstances() -> [ApplicationInstance<ApplicationItem>] {
         let runningSpan = PerformanceLog.begin("catalog.runningApps")
         let runningApplications = workspace.runningApplications
         PerformanceLog.end(runningSpan, "running=\(runningApplications.count)")
 
         let filterSpan = PerformanceLog.begin("catalog.filter")
-        var itemsByBundleIdentifier: [String: ApplicationItem] = [:]
-
-        for application in runningApplications {
+        let instances = runningApplications.compactMap {
+            application -> ApplicationInstance<ApplicationItem>? in
             let discoveryPolicy = ApplicationDiscoveryPolicy(application: application)
             guard
                 discoveryPolicy.isCandidate,
@@ -181,48 +182,36 @@ final class ApplicationCatalog: NSObject {
                 let name = application.localizedName,
                 let icon = ApplicationIconResolver.icon(for: application)
             else {
-                continue
+                return nil
             }
 
-            let item = ApplicationItem(
-                application: application,
-                discoveryPolicy: discoveryPolicy,
-                bundleIdentifier: bundleIdentifier,
+            return ApplicationInstance(
+                item: ApplicationItem(
+                    application: application,
+                    bundleIdentifier: bundleIdentifier,
+                    name: name,
+                    icon: icon
+                ),
+                applicationIdentifier: bundleIdentifier,
                 name: name,
-                icon: icon
+                processIdentifier: application.processIdentifier,
+                policy: discoveryPolicy
             )
-
-            if let existingItem = itemsByBundleIdentifier[bundleIdentifier],
-               !shouldPrefer(item, over: existingItem) {
-                continue
-            }
-
-            itemsByBundleIdentifier[bundleIdentifier] = item
         }
-
-        PerformanceLog.end(filterSpan, "kept=\(itemsByBundleIdentifier.count)")
+        PerformanceLog.end(filterSpan, "kept=\(instances.count)")
 
         let sortSpan = PerformanceLog.begin("catalog.sort")
         defer {
             PerformanceLog.end(sortSpan)
         }
 
-        let recentRanks = recentApplications.identifiers.enumerated().reduce(
-            into: [String: Int]()
-        ) { ranks, entry in
-            ranks[entry.element] = entry.offset
-        }
-
-        return itemsByBundleIdentifier.values.sorted { left, right in
-            let leftRank = recentRanks[left.bundleIdentifier] ?? Int.max
-            let rightRank = recentRanks[right.bundleIdentifier] ?? Int.max
-
-            if leftRank != rightRank {
-                return leftRank < rightRank
-            }
-
-            return left.name.localizedStandardCompare(right.name) == .orderedAscending
-        }
+        // The window query runs in this order, so the applications the user
+        // is most likely to pick are resolved first when its budget is tight.
+        return ApplicationTargetPlan.ordered(
+            instances,
+            recentApplicationIdentifiers: recentApplications.identifiers,
+            recentProcessIdentifiers: recentProcesses.identifiers
+        )
     }
 
     @objc
@@ -240,9 +229,13 @@ final class ApplicationCatalog: NSObject {
     private func recordActivation(_ application: NSRunningApplication) {
         guard
             ApplicationDiscoveryPolicy(application: application).isCandidate,
-            let bundleIdentifier = application.bundleIdentifier,
-            recentApplications.identifiers.first != bundleIdentifier
+            let bundleIdentifier = application.bundleIdentifier
         else {
+            return
+        }
+
+        recentProcesses.record(application.processIdentifier)
+        guard recentApplications.identifiers.first != bundleIdentifier else {
             return
         }
 
@@ -252,20 +245,5 @@ final class ApplicationCatalog: NSObject {
             recentApplications.identifiers,
             forKey: Self.recentApplicationsKey
         )
-    }
-
-    private func shouldPrefer(
-        _ candidate: ApplicationItem,
-        over existing: ApplicationItem
-    ) -> Bool {
-        let candidateIsActive = candidate.application.isActive
-        let existingIsActive = existing.application.isActive
-
-        if candidateIsActive != existingIsActive {
-            return candidateIsActive
-        }
-
-        return candidate.application.processIdentifier
-            < existing.application.processIdentifier
     }
 }

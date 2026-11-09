@@ -10,27 +10,7 @@ enum ApplicationWindowService {
         let isHidden: Bool
     }
 
-    struct Snapshot: Sendable {
-        let resolutions: [pid_t: ApplicationWindowResolution<ApplicationWindow>]
-
-        /// An application whose query never ran or did not finish is offered
-        /// as a whole.
-        func resolution(
-            for processIdentifier: pid_t
-        ) -> ApplicationWindowResolution<ApplicationWindow> {
-            resolutions[processIdentifier] ?? .application
-        }
-
-        func includesApplication(
-            _ processIdentifier: pid_t,
-            policy: ApplicationDiscoveryPolicy
-        ) -> Bool {
-            policy.shouldInclude(
-                hasSwitchableWindows: resolution(for: processIdentifier)
-                    .hasSwitchableWindows
-            )
-        }
-    }
+    typealias Resolutions = [pid_t: ApplicationWindowResolution<ApplicationWindow>]
 
     private struct ApplicationWindowsQuery {
         let observations: [ApplicationWindowObservation<ApplicationWindow>]
@@ -48,11 +28,13 @@ enum ApplicationWindowService {
     // busy app from consuming the whole snapshot without flooding the AX server.
     private static let maximumConcurrentApplicationQueries = 4
 
-    static func snapshot(
+    /// Resolves the candidates' windows within one bounded budget. A
+    /// candidate missing from the result was not resolved in time.
+    static func resolutions(
         for candidates: [Candidate]
-    ) async -> Snapshot {
+    ) async -> Resolutions {
         let queryTask = Task.detached(priority: .userInitiated) {
-            await queryStates(for: candidates)
+            await queryResolutions(for: candidates)
         }
 
         return await withTaskCancellationHandler {
@@ -116,11 +98,11 @@ enum ApplicationWindowService {
         )
     }
 
-    private static func queryStates(
+    private static func queryResolutions(
         for candidates: [Candidate]
-    ) async -> Snapshot {
+    ) async -> Resolutions {
         guard !Task.isCancelled else {
-            return Snapshot(resolutions: [:])
+            return [:]
         }
 
         let windowListSpan = PerformanceLog.begin("ax.windowList")
@@ -128,10 +110,10 @@ enum ApplicationWindowService {
         PerformanceLog.end(windowListSpan)
 
         guard let plan else {
-            return Snapshot(resolutions: [:])
+            return [:]
         }
         guard AccessibilityPermission.isGranted else {
-            return Snapshot(resolutions: [:])
+            return [:]
         }
 
         // Preserve the budget for regular apps and visible accessory windows;
@@ -177,7 +159,7 @@ enum ApplicationWindowService {
             )
         }
 
-        let resolutions = await withTaskGroup(
+        return await withTaskGroup(
             of: WindowResolutionQueryResult.self
         ) { group in
             var candidates = queryCandidates.makeIterator()
@@ -199,7 +181,7 @@ enum ApplicationWindowService {
                 }
             }
 
-            var resolutions: [pid_t: ApplicationWindowResolution<ApplicationWindow>] = [:]
+            var resolutions: Resolutions = [:]
             var resolvedCount = 0
 
             while let result = await group.next() {
@@ -240,7 +222,6 @@ enum ApplicationWindowService {
             )
             return resolutions
         }
-        return Snapshot(resolutions: resolutions)
     }
 
     private static func queryResolution(
