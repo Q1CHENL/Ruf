@@ -15,7 +15,6 @@ final class SwitcherPanelController {
     private let glassView: NSGlassEffectView
     private let applicationResourceUsageCallout:
         SwitcherResourceCalloutPanelController
-    private let presentationDiagnostics: SwitcherPanelPresentationDiagnostics
     private var previouslyActiveApplication: NSRunningApplication?
 
     init(
@@ -40,10 +39,6 @@ final class SwitcherPanelController {
         self.panel = panel
         applicationResourceUsageCallout =
             SwitcherResourceCalloutPanelController(model: model)
-        presentationDiagnostics = SwitcherPanelPresentationDiagnostics(
-            panel: panel,
-            glassView: glassView
-        )
 
         glassView.style = .regular
         // The glass material's own rounded SDF draws an adaptive optical rim
@@ -86,7 +81,6 @@ final class SwitcherPanelController {
     }
 
     func show(itemCount: Int) {
-        presentationDiagnostics.presentationWillBegin()
         previouslyActiveApplication = NSWorkspace.shared.frontmostApplication
 
         // Resizing forces the hosting view to lay the grid out, so the first
@@ -113,11 +107,6 @@ final class SwitcherPanelController {
         panel.makeKeyAndOrderFront(nil)
         PerformanceLog.end(orderFrontSpan, "items=\(itemCount)")
 
-        presentationDiagnostics.recordPresentation(
-            itemCount: itemCount,
-            expectedSize: size
-        )
-
         DispatchQueue.main.async { [weak self] in
             guard let self, self.panel.isVisible, !self.panel.isKeyWindow else {
                 return
@@ -128,7 +117,6 @@ final class SwitcherPanelController {
     }
 
     func hide() {
-        presentationDiagnostics.presentationWillEnd()
         applicationResourceUsageCallout.hide()
         panel.orderOut(nil)
         previouslyActiveApplication = nil
