@@ -58,7 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private lazy var softwareUpdateController = SPUStandardUpdaterController(
         startingUpdater: false,
         updaterDelegate: self,
-        userDriverDelegate: nil
+        userDriverDelegate: self
     )
 
     private var statusItem: NSStatusItem?
@@ -725,5 +725,35 @@ extension AppDelegate: SPUUpdaterDelegate {
             version: updateItem.displayVersionString
         )
         updateSoftwareUpdateMenuItem()
+    }
+}
+
+// Ruf runs without a Dock icon, so Sparkle would otherwise show a scheduled
+// update's alert behind other apps. Ruf's update title and the badge on its
+// Settings target are the reminder instead, and choosing that title asks
+// Sparkle to bring the pending update into focus.
+extension AppDelegate: @MainActor SPUStandardUserDriverDelegate {
+    var supportsGentleScheduledUpdateReminders: Bool {
+        true
+    }
+
+    func standardUserDriverShouldHandleShowingScheduledUpdate(
+        _ update: SUAppcastItem,
+        andInImmediateFocus immediateFocus: Bool
+    ) -> Bool {
+        // Sparkle still presents an update it would put in front of the user
+        // anyway, shortly after launch, and one Ruf has no reminder for.
+        immediateFocus
+            || softwareUpdateAvailability.availableVersion
+                != update.displayVersionString
+    }
+
+    func standardUserDriverWillHandleShowingUpdate(
+        _ handleShowingUpdate: Bool,
+        forUpdate update: SUAppcastItem,
+        state: SPUUserUpdateState
+    ) {
+        // `updater(_:didFindValidUpdate:)` has already recorded this update,
+        // which the reminder shows until it is installed or skipped.
     }
 }
