@@ -52,86 +52,54 @@ final class NewWindowMenuTitleMatcherTests: XCTestCase {
 }
 
 final class NewWindowMenuItemMatcherTests: XCTestCase {
-    func testClassifiesAnEnabledNewWindowLeafAsAnExactMatch() {
+    func testClassifiesAnEnabledNewWindowLeafAsAMatch() {
         XCTAssertEqual(
-            NewWindowMenuItemMatcher.match(
-                title: "New Window",
-                isEnabled: true,
-                hasChildren: false,
-                isInsideNewWindowSubmenu: false,
-                isDirectTopLevelMenuItem: false,
-                commandCharacter: nil,
-                commandModifiers: nil
-            ),
-            .exactTitle
+            match(title: "New Window"),
+            .newWindow
         )
     }
 
     func testRejectsANewWindowSubmenuParent() {
         XCTAssertEqual(
-            NewWindowMenuItemMatcher.match(
+            match(
                 title: "New Window",
-                isEnabled: true,
                 hasChildren: true,
-                isInsideNewWindowSubmenu: false,
-                isDirectTopLevelMenuItem: true,
-                commandCharacter: nil,
-                commandModifiers: nil
+                isDirectTopLevelMenuItem: true
             ),
             .none
         )
     }
 
-    func testClassifiesCommandNInsideANewWindowSubmenuAsFallback() {
+    func testClassifiesCommandNInsideANewWindowSubmenuAsAMatch() {
         XCTAssertEqual(
-            NewWindowMenuItemMatcher.match(
+            match(
                 title: "Built-in",
-                isEnabled: true,
-                hasChildren: false,
                 isInsideNewWindowSubmenu: true,
-                isDirectTopLevelMenuItem: false,
-                commandCharacter: "n",
-                commandModifiers: 0
+                shortcut: ("n", 0)
             ),
-            .shortcutFallback
+            .newWindow
         )
         XCTAssertEqual(
-            NewWindowMenuItemMatcher.match(
-                title: "New File",
-                isEnabled: true,
-                hasChildren: false,
-                isInsideNewWindowSubmenu: false,
-                isDirectTopLevelMenuItem: false,
-                commandCharacter: "n",
-                commandModifiers: 0
-            ),
+            match(title: "New File", shortcut: ("n", 0)),
             .none
         )
     }
 
     func testClassifiesDirectTopLevelCommandNAsLocaleIndependentFallback() {
         XCTAssertEqual(
-            NewWindowMenuItemMatcher.match(
+            match(
                 title: "Nouvelle fenêtre",
-                isEnabled: true,
-                hasChildren: false,
-                isInsideNewWindowSubmenu: false,
                 isDirectTopLevelMenuItem: true,
-                commandCharacter: "n",
-                commandModifiers: 0
+                shortcut: ("n", 0)
             ),
             .shortcutFallback
         )
 
         XCTAssertEqual(
-            NewWindowMenuItemMatcher.match(
+            match(
                 title: "Nouvelle fenêtre privée",
-                isEnabled: true,
-                hasChildren: false,
-                isInsideNewWindowSubmenu: false,
                 isDirectTopLevelMenuItem: true,
-                commandCharacter: "n",
-                commandModifiers: 1
+                shortcut: ("n", 1)
             ),
             .none
         )
@@ -139,96 +107,180 @@ final class NewWindowMenuItemMatcherTests: XCTestCase {
 
     func testRejectsModifiedOrDisabledSubmenuCommands() {
         XCTAssertEqual(
-            NewWindowMenuItemMatcher.match(
+            match(
                 title: "Built-in with Same Command",
-                isEnabled: true,
-                hasChildren: false,
                 isInsideNewWindowSubmenu: true,
-                isDirectTopLevelMenuItem: false,
-                commandCharacter: "n",
-                commandModifiers: 1
+                shortcut: ("n", 1)
             ),
             .none
         )
         XCTAssertEqual(
-            NewWindowMenuItemMatcher.match(
+            match(
                 title: "Built-in",
                 isEnabled: false,
-                hasChildren: false,
                 isInsideNewWindowSubmenu: true,
-                isDirectTopLevelMenuItem: false,
-                commandCharacter: "n",
-                commandModifiers: 0
+                shortcut: ("n", 0)
             ),
             .none
+        )
+    }
+
+    func testReadsTheShortcutOnlyWhenItDecidesTheMatch() {
+        var reads = 0
+        let shortcut = { () -> (character: String?, modifiers: UInt32?) in
+            reads += 1
+            return ("n", 0)
+        }
+
+        for (title, isInsideNewWindowSubmenu, isDirectTopLevelMenuItem) in [
+            ("New Window", true, true),
+            ("Close", false, false),
+        ] {
+            _ = NewWindowMenuItemMatcher.match(
+                title: title,
+                isEnabled: true,
+                hasChildren: false,
+                isInsideNewWindowSubmenu: isInsideNewWindowSubmenu,
+                isDirectTopLevelMenuItem: isDirectTopLevelMenuItem,
+                commandShortcut: shortcut
+            )
+        }
+        XCTAssertEqual(reads, 0)
+
+        _ = NewWindowMenuItemMatcher.match(
+            title: "Nouvelle fenêtre",
+            isEnabled: true,
+            hasChildren: false,
+            isInsideNewWindowSubmenu: false,
+            isDirectTopLevelMenuItem: true,
+            commandShortcut: shortcut
+        )
+        XCTAssertEqual(reads, 1)
+    }
+
+    private func match(
+        title: String?,
+        isEnabled: Bool = true,
+        hasChildren: Bool = false,
+        isInsideNewWindowSubmenu: Bool = false,
+        isDirectTopLevelMenuItem: Bool = false,
+        shortcut: (character: String?, modifiers: UInt32?) = (nil, nil)
+    ) -> NewWindowMenuItemMatch {
+        NewWindowMenuItemMatcher.match(
+            title: title,
+            isEnabled: isEnabled,
+            hasChildren: hasChildren,
+            isInsideNewWindowSubmenu: isInsideNewWindowSubmenu,
+            isDirectTopLevelMenuItem: isDirectTopLevelMenuItem,
+            commandShortcut: { shortcut }
         )
     }
 }
 
 final class NewWindowMenuSearchDecisionTests: XCTestCase {
-    func testDefersFallbackWhileAnIncompleteSearchCanRetry() {
+    func testPressesAMatchEvenFromAnIncompleteReading() {
         XCTAssertEqual(
-            NewWindowMenuSearchDecision.deferredDecision(
-                hasFallback: true,
-                wasIncomplete: true,
-                hasTimeRemaining: true
-            ),
-            .reportIncomplete
-        )
-        XCTAssertEqual(
-            NewWindowMenuSearchDecision.deferredDecision(
-                hasFallback: true,
-                wasIncomplete: true,
-                hasTimeRemaining: false
-            ),
-            .requestFallback
-        )
-        XCTAssertEqual(
-            NewWindowMenuSearchDecision.deferredDecision(
-                hasFallback: true,
-                wasIncomplete: false,
-                hasTimeRemaining: true
-            ),
-            .requestFallback
+            nextStep(match: "match", fallback: "fallback", isComplete: false),
+            .press("match")
         )
     }
 
-    func testRetriesIncompleteSearchesAndFailedActionsWhileTimeRemains() {
-        XCTAssertTrue(
-            NewWindowMenuSearchDecision.shouldRetry(
-                after: .incomplete,
-                hasTimeRemaining: true
-            )
+    func testGivesUpOnACompleteReadingWithoutAnyItem() {
+        XCTAssertEqual(nextStep(isComplete: true), .giveUp)
+    }
+
+    func testPressesTheFallbackOnceTheReadingIsComplete() {
+        XCTAssertEqual(
+            nextStep(fallback: "fallback", isComplete: true),
+            .press("fallback")
         )
-        XCTAssertFalse(
-            NewWindowMenuSearchDecision.shouldRetry(
-                after: .incomplete,
+    }
+
+    func testRereadsAnIncompleteMenuWhileTimeRemains() {
+        XCTAssertEqual(nextStep(isComplete: false), .retry)
+        XCTAssertEqual(
+            nextStep(fallback: "fallback", isComplete: false),
+            .retry
+        )
+    }
+
+    // The final attempt can start after the budget expired and fail to read
+    // even the menu bar, so its reading is empty. The fallback found by an
+    // earlier attempt is still the best answer.
+    func testPressesTheFallbackWhenTheBudgetExpiresOnAnIncompleteReading() {
+        XCTAssertEqual(
+            nextStep(
+                fallback: "fallback",
+                isComplete: false,
+                coverage: coverage(0, 0),
+                previousCoverage: coverage(12, 40),
                 hasTimeRemaining: false
-            )
+            ),
+            .press("fallback")
         )
-        XCTAssertTrue(
-            NewWindowMenuSearchDecision.shouldRetry(
-                after: .actionFailed,
-                hasTimeRemaining: true
-            )
+        XCTAssertEqual(
+            nextStep(isComplete: false, hasTimeRemaining: false),
+            .giveUp
         )
-        XCTAssertFalse(
-            NewWindowMenuSearchDecision.shouldRetry(
-                after: .actionFailed,
-                hasTimeRemaining: false
-            )
+    }
+
+    func testPressesTheFallbackOnceTheCoverageStopsChanging() {
+        XCTAssertEqual(
+            nextStep(
+                fallback: "fallback",
+                isComplete: false,
+                coverage: coverage(12, 40),
+                previousCoverage: coverage(12, 40)
+            ),
+            .press("fallback")
         )
-        XCTAssertFalse(
-            NewWindowMenuSearchDecision.shouldRetry(
-                after: .actionRequested,
-                hasTimeRemaining: true
-            )
+
+        // A tree that is still growing may yet expose the New Window item.
+        XCTAssertEqual(
+            nextStep(
+                fallback: "fallback",
+                isComplete: false,
+                coverage: coverage(18, 52),
+                previousCoverage: coverage(12, 40)
+            ),
+            .retry
         )
-        XCTAssertFalse(
-            NewWindowMenuSearchDecision.shouldRetry(
-                after: .noMatch,
-                hasTimeRemaining: true
-            )
+
+        // Without a fallback there is nothing to settle for.
+        XCTAssertEqual(
+            nextStep(
+                isComplete: false,
+                coverage: coverage(12, 40),
+                previousCoverage: coverage(12, 40)
+            ),
+            .retry
         )
+    }
+
+    private func nextStep(
+        match: String? = nil,
+        fallback: String? = nil,
+        isComplete: Bool,
+        coverage: NewWindowMenuSearchCoverage = .init(visited: 1, queued: 1),
+        previousCoverage: NewWindowMenuSearchCoverage? = nil,
+        hasTimeRemaining: Bool = true
+    ) -> NewWindowMenuSearchStep<String> {
+        NewWindowMenuSearchDecision.nextStep(
+            after: NewWindowMenuSearchAttempt(
+                match: match,
+                fallback: fallback,
+                isComplete: isComplete,
+                coverage: coverage
+            ),
+            previousCoverage: previousCoverage,
+            hasTimeRemaining: hasTimeRemaining
+        )
+    }
+
+    private func coverage(
+        _ visited: Int,
+        _ queued: Int
+    ) -> NewWindowMenuSearchCoverage {
+        NewWindowMenuSearchCoverage(visited: visited, queued: queued)
     }
 }

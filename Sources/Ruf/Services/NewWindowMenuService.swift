@@ -18,18 +18,14 @@ enum NewWindowMenuService {
     private enum MenuBarQueryResult {
         case found(AXUIElement)
         case incomplete
-        case noMatch
+        case unsupported
     }
 
-    // How much of a menu tree one traversal managed to read. Two identical
-    // readings mean the tree has stopped changing under it.
-    private struct SearchCoverage: Equatable {
-        let visited: Int
-        let queued: Int
+    private enum PressResult {
+        case delivered
+        case stale
     }
 
-    // AX has no menu-tree-ready notification. Incomplete reads are polled
-    // within this bounded interaction budget; complete searches return early.
     private static let messageTimeout: Float = 0.2
     private static let queryBudget = DispatchTimeInterval.milliseconds(1_500)
     private static let retryInterval: Duration = .milliseconds(20)
@@ -73,59 +69,42 @@ enum NewWindowMenuService {
             for: applicationElement
         )
         let deadline = DispatchTime.now() + queryBudget
-
-        // The search defers a shortcut match while an incomplete read can still
-        // be retried, and falls back to it once the budget expires. That last
-        // attempt starts after the deadline and returns before traversing
-        // anything, so the match has to outlive the attempt that found it.
-        var shortcutFallback: AXUIElement?
-        var previousCoverage: SearchCoverage?
+        var fallback: AXUIElement?
+        var previousCoverage: NewWindowMenuSearchCoverage?
 
         while !Task.isCancelled {
-            var outcome: NewWindowMenuSearchOutcome
-            var coverage = SearchCoverage(
-                visited: 0,
-                queued: 0
+            let attempt = searchAttempt(
+                in: applicationElement,
+                fallback: fallback,
+                deadline: deadline
             )
-            switch menuBar(from: applicationElement) {
-            case let .found(menuBar):
-                outcome = searchNewWindowMenuItem(
-                    in: menuBar,
-                    deadline: deadline,
-                    shortcutFallback: &shortcutFallback,
-                    coverage: &coverage
-                )
-            case .incomplete:
-                outcome = .incomplete
-            case .noMatch:
-                outcome = .noMatch
-            }
+            fallback = attempt.fallback
 
-            // A tree that reports identical coverage twice has stopped being
-            // built, so waiting out the remaining budget only delays a match
-            // already in hand.
-            if outcome == .incomplete,
-               coverage == previousCoverage,
-               let shortcutFallback {
-                outcome = requestNewWindowAction(on: shortcutFallback)
-            }
-
-            switch outcome {
-            case .actionRequested:
-                return .menuActionRequested
-            case .noMatch:
-                return .unavailable
-            case .actionFailed:
-                shortcutFallback = nil
-                previousCoverage = nil
-            case .incomplete:
-                previousCoverage = coverage
-            }
-
-            guard NewWindowMenuSearchDecision.shouldRetry(
-                after: outcome,
+            switch NewWindowMenuSearchDecision.nextStep(
+                after: attempt,
+                previousCoverage: previousCoverage,
                 hasTimeRemaining: DispatchTime.now() < deadline
-            ) else {
+            ) {
+            case let .press(element):
+                guard !Task.isCancelled else {
+                    return .unavailable
+                }
+
+                switch press(element) {
+                case .delivered:
+                    return .menuActionRequested
+                case .stale:
+                    // The menu was rebuilt after it was read, so none of the
+                    // items read from it, the fallback included, still exist.
+                    fallback = nil
+                    previousCoverage = nil
+                    guard DispatchTime.now() < deadline else {
+                        return .unavailable
+                    }
+                }
+            case .retry:
+                previousCoverage = attempt.coverage
+            case .giveUp:
                 return .unavailable
             }
 
@@ -157,18 +136,44 @@ enum NewWindowMenuService {
 
         if AXElementReader.error(from: applicationValues[0])
             == .attributeUnsupported {
-            return .noMatch
+            return .unsupported
         }
 
         return .incomplete
     }
 
+    private static func searchAttempt(
+        in applicationElement: AXUIElement,
+        fallback: AXUIElement?,
+        deadline: DispatchTime
+    ) -> NewWindowMenuSearchAttempt<AXUIElement> {
+        let isComplete: Bool
+        switch menuBar(from: applicationElement) {
+        case let .found(menuBar):
+            return searchNewWindowMenuItem(
+                in: menuBar,
+                fallback: fallback,
+                deadline: deadline
+            )
+        case .incomplete:
+            isComplete = false
+        case .unsupported:
+            isComplete = true
+        }
+
+        return NewWindowMenuSearchAttempt(
+            match: nil,
+            fallback: fallback,
+            isComplete: isComplete,
+            coverage: NewWindowMenuSearchCoverage(visited: 0, queued: 0)
+        )
+    }
+
     private static func searchNewWindowMenuItem(
         in menuBar: AXUIElement,
-        deadline: DispatchTime,
-        shortcutFallback: inout AXUIElement?,
-        coverage: inout SearchCoverage
-    ) -> NewWindowMenuSearchOutcome {
+        fallback carriedFallback: AXUIElement?,
+        deadline: DispatchTime
+    ) -> NewWindowMenuSearchAttempt<AXUIElement> {
         var elements = [
             TraversalEntry(
                 element: menuBar,
@@ -177,35 +182,36 @@ enum NewWindowMenuService {
             ),
         ]
         var index = 0
-        var wasIncomplete = false
-        defer {
-            coverage = SearchCoverage(
-                visited: index,
-                queued: elements.count
+        var fallback = carriedFallback
+        var isComplete = true
+
+        func attempt(
+            match: AXUIElement? = nil
+        ) -> NewWindowMenuSearchAttempt<AXUIElement> {
+            NewWindowMenuSearchAttempt(
+                match: match,
+                fallback: fallback,
+                isComplete: isComplete,
+                coverage: NewWindowMenuSearchCoverage(
+                    visited: index,
+                    queued: elements.count
+                )
             )
         }
 
         while index < elements.count {
-            guard !Task.isCancelled else {
-                return .noMatch
+            guard !Task.isCancelled,
+                  DispatchTime.now() < deadline else {
+                isComplete = false
+                break
             }
 
-            let hasTimeRemaining = DispatchTime.now() < deadline
-            guard hasTimeRemaining else {
-                return resolveDeferredSearch(
-                    shortcutFallback: shortcutFallback,
-                    wasIncomplete: wasIncomplete,
-                    hasTimeRemaining: false
-                )
-            }
-
+            // The search is breadth-first, so every item of the top-level menus
+            // has been read by now. Deeper submenus are searched only for an
+            // application without a Command-N item to fall back to.
             let entry = elements[index]
-            if entry.menuDepth > 1, shortcutFallback != nil {
-                return resolveDeferredSearch(
-                    shortcutFallback: shortcutFallback,
-                    wasIncomplete: wasIncomplete,
-                    hasTimeRemaining: true
-                )
+            if entry.menuDepth > 1, fallback != nil {
+                break
             }
 
             index += 1
@@ -222,93 +228,56 @@ enum NewWindowMenuService {
                 ],
                 from: element
             ) else {
-                wasIncomplete = true
+                isComplete = false
                 continue
             }
 
             if AXElementReader.containsTransientError(in: menuValues) {
-                wasIncomplete = true
+                isComplete = false
             }
 
             let role: String? = AXElementReader.decoded(menuValues[0])
             let title: String? = AXElementReader.decoded(menuValues[1])
             let isEnabled: Bool = AXElementReader.decoded(menuValues[2]) ?? false
             guard let children = menuChildren(from: menuValues[3]) else {
-                wasIncomplete = true
+                isComplete = false
                 continue
             }
 
             let isMenuItem = role == kAXMenuItemRole
             let hasChildren = !children.isEmpty
-            let isDirectTopLevelMenuItem = isMenuItem && entry.menuDepth == 1
-            let entersNewWindowSubmenu = isMenuItem
-                && isEnabled
-                && hasChildren
-                && title.map(NewWindowMenuTitleMatcher.matches) == true
-
-            var commandCharacter: String?
-            var commandModifiers: UInt32?
-            let requiresShortcutMatch = isMenuItem
-                && isEnabled
-                && !hasChildren
-                && (
-                    entry.isInsideNewWindowSubmenu
-                        || isDirectTopLevelMenuItem
-                )
-                && title.map(NewWindowMenuTitleMatcher.matches) != true
-
-            if requiresShortcutMatch {
-                guard let commandValues = AXElementReader.values(
-                    of: [
-                        kAXMenuItemCmdCharAttribute,
-                        kAXMenuItemCmdModifiersAttribute,
-                    ],
-                    from: element
-                ) else {
-                    wasIncomplete = true
-                    continue
-                }
-
-                if AXElementReader.containsTransientError(in: commandValues) {
-                    wasIncomplete = true
-                }
-
-                commandCharacter = AXElementReader.decoded(commandValues[0])
-                let modifierNumber: NSNumber? = AXElementReader.decoded(
-                    commandValues[1]
-                )
-                commandModifiers = modifierNumber?.uint32Value
-            }
-
             let match = isMenuItem
                 ? NewWindowMenuItemMatcher.match(
                     title: title,
                     isEnabled: isEnabled,
                     hasChildren: hasChildren,
                     isInsideNewWindowSubmenu: entry.isInsideNewWindowSubmenu,
-                    isDirectTopLevelMenuItem: isDirectTopLevelMenuItem,
-                    commandCharacter: commandCharacter,
-                    commandModifiers: commandModifiers
+                    isDirectTopLevelMenuItem: entry.menuDepth == 1,
+                    commandShortcut: {
+                        commandShortcut(of: element, isComplete: &isComplete)
+                    }
                 )
                 : .none
 
             switch match {
-            case .exactTitle:
-                return requestNewWindowAction(on: element)
+            case .newWindow:
+                return attempt(match: element)
             case .shortcutFallback:
-                if entry.isInsideNewWindowSubmenu {
-                    return requestNewWindowAction(on: element)
-                }
-                shortcutFallback = element
+                fallback = element
             case .none:
                 break
             }
 
             let isInsideNewWindowSubmenu = entry.isInsideNewWindowSubmenu
-                || entersNewWindowSubmenu
+                || (
+                    isMenuItem
+                        && isEnabled
+                        && hasChildren
+                        && title.map(NewWindowMenuTitleMatcher.matches) == true
+                )
             let remainingCapacity = maximumElementCount - elements.count
             if children.count > remainingCapacity {
-                wasIncomplete = true
+                isComplete = false
             }
 
             let childMenuDepth = entry.menuDepth
@@ -324,52 +293,43 @@ enum NewWindowMenuService {
             }
         }
 
-        return resolveDeferredSearch(
-            shortcutFallback: shortcutFallback,
-            wasIncomplete: wasIncomplete,
-            hasTimeRemaining: DispatchTime.now() < deadline
-        )
+        return attempt()
     }
 
-    private static func resolveDeferredSearch(
-        shortcutFallback: AXUIElement?,
-        wasIncomplete: Bool,
-        hasTimeRemaining: Bool
-    ) -> NewWindowMenuSearchOutcome {
-        switch NewWindowMenuSearchDecision.deferredDecision(
-            hasFallback: shortcutFallback != nil,
-            wasIncomplete: wasIncomplete,
-            hasTimeRemaining: hasTimeRemaining
-        ) {
-        case .requestFallback:
-            guard let shortcutFallback else {
-                return .noMatch
-            }
-            return requestNewWindowAction(on: shortcutFallback)
-        case .reportIncomplete:
-            return .incomplete
-        case .noMatch:
-            return .noMatch
+    private static func commandShortcut(
+        of element: AXUIElement,
+        isComplete: inout Bool
+    ) -> (character: String?, modifiers: UInt32?) {
+        guard let commandValues = AXElementReader.values(
+            of: [
+                kAXMenuItemCmdCharAttribute,
+                kAXMenuItemCmdModifiersAttribute,
+            ],
+            from: element
+        ) else {
+            isComplete = false
+            return (nil, nil)
         }
+
+        if AXElementReader.containsTransientError(in: commandValues) {
+            isComplete = false
+        }
+
+        let modifiers: NSNumber? = AXElementReader.decoded(commandValues[1])
+        return (AXElementReader.decoded(commandValues[0]), modifiers?.uint32Value)
     }
 
-    private static func requestNewWindowAction(
-        on element: AXUIElement
-    ) -> NewWindowMenuSearchOutcome {
-        guard !Task.isCancelled else {
-            return .noMatch
-        }
-
-        // The deferred match can be pressed a whole budget after it was found,
-        // by which point the menu may have been rebuilt. Reporting success
-        // without checking would turn that into a silently ignored request.
+    private static func press(_ element: AXUIElement) -> PressResult {
+        // A fallback can be pressed a whole budget after it was read, by which
+        // point the menu may have been rebuilt. Reporting success without
+        // checking would turn that into a silently ignored request.
         let error = AXClientContext.withDefaultIdentity {
             AXUIElementPerformAction(
                 element,
                 kAXPressAction as CFString
             )
         }
-        return error == .success ? .actionRequested : .actionFailed
+        return error == .success ? .delivered : .stale
     }
 
     private static func menuChildren(
