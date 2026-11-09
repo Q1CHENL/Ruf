@@ -354,39 +354,6 @@ final class WindowMovementPlannerTests: XCTestCase {
         )
     }
 
-    func testExposesResizeWhenTheDestinationSizeChanges() {
-        let start = CGRect(x: 0, y: 100, width: 1_000, height: 800)
-        let destination = CGRect(x: 1_000, y: 300, width: 500, height: 400)
-        let mutations = WindowMovementMutationPlan(
-            from: start,
-            to: destination
-        )
-
-        XCTAssertEqual(mutations.destinationPosition, destination.origin)
-        XCTAssertTrue(mutations.requiresResize)
-        XCTAssertEqual(
-            mutations.finalPlacementMutations,
-            [
-                .position(destination.origin),
-                .size(destination.size),
-                .position(destination.origin),
-            ]
-        )
-    }
-
-    func testOmitsResizeWhenTheWindowAlreadyFits() {
-        let mutations = WindowMovementMutationPlan(
-            from: CGRect(x: 0, y: 100, width: 500, height: 400),
-            to: CGRect(x: 1_000, y: 300, width: 500, height: 400)
-        )
-
-        XCTAssertFalse(mutations.requiresResize)
-        XCTAssertEqual(
-            mutations.finalPlacementMutations,
-            [.position(CGPoint(x: 1_000, y: 300))]
-        )
-    }
-
     func testMutationPolicyAcceptsIndeterminateAXWritesWithoutRetrying() {
         XCTAssertTrue(WindowMutationPolicy.accepts(.succeeded))
         XCTAssertTrue(WindowMutationPolicy.accepts(.indeterminate))
@@ -422,29 +389,6 @@ final class WindowMovementPlannerTests: XCTestCase {
         XCTAssertFalse(
             WindowMovementAnimationStopReason.finalPlacementFailed
                 .settlesAtDestination
-        )
-    }
-
-    func testAnimationRequestPolicyPrioritizesDisplayConfigurationChanges() {
-        XCTAssertEqual(
-            WindowMovementAnimationStopReason.beforeMove(
-                destinationExists: false,
-                focusedWindowMatches: false
-            ),
-            .displayConfigurationChanged
-        )
-        XCTAssertEqual(
-            WindowMovementAnimationStopReason.beforeMove(
-                destinationExists: true,
-                focusedWindowMatches: false
-            ),
-            .focusedWindowChanged
-        )
-        XCTAssertNil(
-            WindowMovementAnimationStopReason.beforeMove(
-                destinationExists: true,
-                focusedWindowMatches: true
-            )
         )
     }
 

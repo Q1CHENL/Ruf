@@ -3,66 +3,29 @@ import AppKit
 import QuartzCore
 import RufCore
 
+/// Applies `WindowMovementSession`'s decisions to the focused window: reads
+/// it through Accessibility, writes frames on `windowWriter`, and presents
+/// the Ghost outline and the display link that paces the animation.
 @MainActor
 final class FocusedWindowMover: NSObject {
-    private struct ScreenSnapshot {
-        let screen: NSScreen
-        let geometry: DisplayGeometry
-    }
-
     private enum WindowMutationTarget {
         case appKit(NSWindow)
         case accessibility(AXUIElement)
     }
 
-    private struct WindowSnapshot {
+    /// Identified by its Accessibility element; written through `target`.
+    private struct MovingWindow: Equatable {
         let element: AXUIElement
-        let mutationTarget: WindowMutationTarget
+        let target: WindowMutationTarget
+
+        static func == (lhs: Self, rhs: Self) -> Bool {
+            CFEqual(lhs.element, rhs.element)
+        }
+    }
+
+    private struct WindowSnapshot {
+        let window: MovingWindow
         let frame: CGRect
-    }
-
-    private struct ActiveAnimation {
-        let identifier: UInt64
-        let window: AXUIElement
-        let mutationTarget: WindowMutationTarget
-        let startFrame: CGRect
-        let mutationPlan: WindowMovementMutationPlan
-        let destinationDisplayFrame: CGRect
-        let style: WindowMovementStyle
-        let startTimestamp: CFTimeInterval
-        // Zero when the window is placed at once: with Reduce Motion, or
-        // when there is no distance to animate.
-        let duration: CFTimeInterval
-        var currentFrame: CGRect
-
-        var showsOutline: Bool {
-            style == .outline && duration > 0
-        }
-
-        var destinationFrame: CGRect {
-            mutationPlan.destinationFrame
-        }
-    }
-
-    private enum MutationPurpose: Sendable {
-        case frame(animationIdentifier: UInt64)
-        case animationCompletion(animationIdentifier: UInt64)
-        case placement
-
-        var animationIdentifier: UInt64? {
-            switch self {
-            case let .frame(animationIdentifier),
-                 let .animationCompletion(animationIdentifier):
-                animationIdentifier
-            case .placement:
-                nil
-            }
-        }
-    }
-
-    private enum MutationResolution: Equatable, Sendable {
-        case proceed
-        case fail
     }
 
     // AXUIElement is an immutable CF handle. The actual AX mutations below
@@ -71,10 +34,10 @@ final class FocusedWindowMover: NSObject {
     private struct WindowMutationRequest: @unchecked Sendable {
         let window: AXUIElement
         let mutations: [WindowFrameMutation]
-        let purpose: MutationPurpose
+        let purpose: WindowMovementWritePurpose
+        let animationIdentifier: UInt64
     }
 
-    private static let animationDuration: CFTimeInterval = 0.2
     private static let queryMessagingTimeout: Float = 0.05
     nonisolated private static let frameMessagingTimeout: Float = 0.005
     nonisolated private static let placementMessagingTimeout: Float = 0.05
@@ -85,9 +48,9 @@ final class FocusedWindowMover: NSObject {
         label: "com.qichen.ruf.window-writer",
         qos: .userInteractive
     )
-    private var activeAnimation: ActiveAnimation?
+    private var session = WindowMovementSession<MovingWindow>()
     private var displayLink: CADisplayLink?
-    private var nextAnimationIdentifier: UInt64 = 0
+    private var displayLinkDisplayFrame: CGRect?
     private var windowWrites = CoalescingRequestQueue<
         WindowMutationRequest,
         UInt64
@@ -101,330 +64,143 @@ final class FocusedWindowMover: NSObject {
             return
         }
 
-        let screens = screenSnapshots()
-        guard screens.count > 1 else {
-            stopAnimation(.displayConfigurationChanged)
-            return
-        }
-
-        guard let window = focusedWindow() else {
-            return
-        }
-
-        let retargeting: (
-            animation: ActiveAnimation,
-            source: DisplayGeometry
-        )?
-        if let animation = activeAnimation {
-            let destinationScreen = screens.first {
-                $0.geometry.frame == animation.destinationDisplayFrame
-            }
-            if let reason = WindowMovementAnimationStopReason.beforeMove(
-                destinationExists: destinationScreen != nil,
-                focusedWindowMatches: CFEqual(animation.window, window.element)
-            ) {
-                stopAnimation(reason)
-                retargeting = nil
-            } else {
-                retargeting = destinationScreen.map {
-                    (animation: animation, source: $0.geometry)
-                }
-            }
-        } else {
-            retargeting = nil
-        }
-
-        guard let plan = WindowMovementPlanner.plan(
-            windowFrame: retargeting?.animation.destinationFrame
-                ?? window.frame,
-            displays: screens.map(\.geometry),
-            direction: direction,
-            preferredSourceDisplay: retargeting?.source
-        ), let destinationScreen = screens.first(where: {
-            $0.geometry == plan.destinationDisplay
-        }) else {
-            return
-        }
-
-        let mutationPlan = WindowMovementMutationPlan(
-            from: window.frame,
-            to: plan.destinationFrame
+        let displays = NSScreen.screens.map(
+            GlobalScreenCoordinates.displayGeometry(of:)
         )
-        guard !mutationPlan.requiresResize
-                || isSizeSettable(of: window.element) else {
+        guard displays.count > 1 else {
+            apply(session.displaysDidChange(displays))
             return
         }
 
-        let startFrame: CGRect
-        if let previous = retargeting?.animation,
-           previous.showsOutline,
-           style == .outline {
-            startFrame = previous.currentFrame
-        } else {
-            startFrame = window.frame
+        guard let snapshot = focusedWindow() else {
+            return
         }
 
-        startAnimation(
-            window: window.element,
-            mutationTarget: window.mutationTarget,
-            from: startFrame,
-            with: mutationPlan,
-            on: destinationScreen,
-            style: style,
-            reducesMotion: NSWorkspace.shared
-                .accessibilityDisplayShouldReduceMotion
+        apply(
+            session.move(
+                direction,
+                style: style,
+                reducesMotion: NSWorkspace.shared
+                    .accessibilityDisplayShouldReduceMotion,
+                window: snapshot.window,
+                frame: snapshot.frame,
+                displays: displays,
+                at: CACurrentMediaTime(),
+                canResize: {
+                    isSizeSettable(of: snapshot.window.element)
+                }
+            )
         )
     }
 
     func stop() {
-        stopAnimation(.shutdown)
+        apply(session.shutDown(), synchronously: true)
     }
 
-    private func startAnimation(
-        window: AXUIElement,
-        mutationTarget: WindowMutationTarget,
-        from startFrame: CGRect,
-        with mutationPlan: WindowMovementMutationPlan,
-        on destinationScreen: ScreenSnapshot,
-        style: WindowMovementStyle,
-        reducesMotion: Bool
+    private func apply(
+        _ effects: [WindowMovementEffect<MovingWindow>],
+        synchronously: Bool = false
     ) {
-        let hasDistance = switch style {
-        case .live:
-            startFrame.origin != mutationPlan.destinationPosition
-        case .outline:
-            startFrame != mutationPlan.destinationFrame
-        }
-        let needsAnimation = hasDistance && !reducesMotion
-        let preservesOutline = activeAnimation?.showsOutline == true
-            && style == .outline
-            && needsAnimation
-        stopAnimation(.retargeted, hidesOutline: !preservesOutline)
-
-        nextAnimationIdentifier += 1
-        let animation = ActiveAnimation(
-            identifier: nextAnimationIdentifier,
-            window: window,
-            mutationTarget: mutationTarget,
-            startFrame: startFrame,
-            mutationPlan: mutationPlan,
-            destinationDisplayFrame: destinationScreen.geometry.frame,
-            style: style,
-            startTimestamp: CACurrentMediaTime(),
-            duration: needsAnimation ? Self.animationDuration : 0,
-            currentFrame: needsAnimation
-                ? startFrame
-                : mutationPlan.destinationFrame
-        )
-        activeAnimation = animation
-
-        // An instant move keeps its animation until the final placement
-        // finishes, so a further move plans from where the window is headed
-        // and replaces the placement if it has not started yet.
-        guard needsAnimation else {
-            placeWindow(
-                target: mutationTarget,
-                with: mutationPlan,
-                purpose: .animationCompletion(
-                    animationIdentifier: animation.identifier
+        for effect in effects {
+            switch effect {
+            case let .write(write):
+                perform(write, synchronously: synchronously)
+            case let .discardPendingWrites(animationIdentifier):
+                windowWrites.removePendingRequests(
+                    coalescingKey: animationIdentifier
                 )
-            )
+            }
+        }
+        updatePresentation()
+    }
+
+    private func updatePresentation() {
+        if let outlineFrame = session.outlineFrame {
+            outlineController.show(frame: appKitFrame(from: outlineFrame))
+        } else {
+            outlineController.hide()
+        }
+
+        let animatingDisplay = session.animatingDisplay
+        guard animatingDisplay?.frame != displayLinkDisplayFrame else {
             return
         }
 
-        if style == .outline {
-            outlineController.show(frame: appKitFrame(from: startFrame))
+        displayLink?.invalidate()
+        displayLink = nil
+        displayLinkDisplayFrame = nil
+        guard let animatingDisplay,
+              let screen = NSScreen.screens.first(where: {
+                  GlobalScreenCoordinates.displayGeometry(of: $0).frame
+                      == animatingDisplay.frame
+              }) else {
+            return
         }
 
-        let displayLink = destinationScreen.screen.displayLink(
+        let displayLink = screen.displayLink(
             target: self,
             selector: #selector(advanceAnimation(_:))
         )
-        self.displayLink = displayLink
         displayLink.add(to: .main, forMode: .common)
+        self.displayLink = displayLink
+        displayLinkDisplayFrame = animatingDisplay.frame
     }
 
     @objc
     private func advanceAnimation(_ displayLink: CADisplayLink) {
-        guard displayLink === self.displayLink,
-              let animation = activeAnimation else {
+        guard displayLink === self.displayLink else {
             displayLink.invalidate()
             return
         }
 
-        let progress = CGFloat(
-            min(
-                1,
-                max(
-                    0,
-                    (displayLink.targetTimestamp - animation.startTimestamp)
-                        / animation.duration
-                )
-            )
-        )
-        let frame = interpolatedFrame(
-            from: animation.startFrame,
-            to: animation.destinationFrame,
-            progress: easeInOutCubic(progress),
-            style: animation.style
-        )
-        activeAnimation?.currentFrame = frame
-
-        if animation.style == .outline {
-            outlineController.update(frame: appKitFrame(from: frame))
-        }
-
-        if progress >= 1 {
-            displayLink.invalidate()
-            self.displayLink = nil
-            placeWindow(
-                target: animation.mutationTarget,
-                with: animation.mutationPlan,
-                purpose: .animationCompletion(
-                    animationIdentifier: animation.identifier
-                )
-            )
-        } else if animation.style == .live {
-            moveWindow(
-                target: animation.mutationTarget,
-                to: frame,
-                purpose: .frame(
-                    animationIdentifier: animation.identifier
-                )
-            )
-        }
+        apply(session.advance(to: displayLink.targetTimestamp))
     }
 
-    private func interpolatedFrame(
-        from start: CGRect,
-        to destination: CGRect,
-        progress: CGFloat,
-        style: WindowMovementStyle
-    ) -> CGRect {
-        let size = switch style {
-        case .live:
-            start.size
-        case .outline:
-            CGSize(
-                width: start.width
-                    + (destination.width - start.width) * progress,
-                height: start.height
-                    + (destination.height - start.height) * progress
-            )
-        }
-
-        return CGRect(
-            origin: CGPoint(
-                x: start.minX + (destination.minX - start.minX) * progress,
-                y: start.minY + (destination.minY - start.minY) * progress
-            ),
-            size: size
-        )
-    }
-
-    private func stopAnimation(
-        _ reason: WindowMovementAnimationStopReason,
-        hidesOutline: Bool = true
+    private func perform(
+        _ write: WindowMovementWrite<MovingWindow>,
+        synchronously: Bool
     ) {
-        let animation = activeAnimation
-        displayLink?.invalidate()
-        displayLink = nil
-        activeAnimation = nil
-
-        guard let animation else {
-            return
-        }
-
-        if hidesOutline, animation.showsOutline {
-            outlineController.hide()
-        }
-        windowWrites.removePendingRequests(
-            coalescingKey: animation.identifier
-        )
-
-        guard reason.settlesAtDestination else {
-            return
-        }
-
-        placeWindow(
-            target: animation.mutationTarget,
-            with: animation.mutationPlan,
-            purpose: .placement,
-            synchronously: reason == .shutdown
-        )
-    }
-
-    private func moveWindow(
-        target: WindowMutationTarget,
-        to frame: CGRect,
-        purpose: MutationPurpose
-    ) {
-        switch target {
-        case let .accessibility(window):
-            enqueueWindowMutation(
-                WindowMutationRequest(
-                    window: window,
-                    mutations: [.position(frame.origin)],
-                    purpose: purpose
-                )
-            )
+        switch write.window.target {
         case let .appKit(window):
-            window.setFrame(
-                appKitFrame(from: frame),
-                display: true
+            window.setFrame(appKitFrame(from: write.frame), display: true)
+            apply(
+                session.writeDidFinish(
+                    write.purpose,
+                    animationIdentifier: write.animationIdentifier,
+                    succeeded: true
+                )
             )
-            mutationDidFinish(purpose, resolution: .proceed)
-        }
-    }
-
-    private func placeWindow(
-        target: WindowMutationTarget,
-        with plan: WindowMovementMutationPlan,
-        purpose: MutationPurpose,
-        synchronously: Bool = false
-    ) {
-        switch target {
-        case let .appKit(window):
-            window.setFrame(
-                appKitFrame(from: plan.destinationFrame),
-                display: true
-            )
-            mutationDidFinish(purpose, resolution: .proceed)
-        case let .accessibility(window):
+        case let .accessibility(element):
             let request = WindowMutationRequest(
-                window: window,
-                mutations: plan.finalPlacementMutations,
-                purpose: purpose
+                window: element,
+                mutations: write.mutations,
+                purpose: write.purpose,
+                animationIdentifier: write.animationIdentifier
             )
             if synchronously {
                 windowWriter.sync {
                     _ = Self.performWindowMutation(request)
                 }
-            } else {
-                enqueueWindowMutation(request)
+            } else if let requestToStart = windowWrites.submit(
+                request,
+                // Settling is never replaced or discarded.
+                coalescingKey: write.purpose == .settle
+                    ? nil
+                    : write.animationIdentifier
+            ) {
+                startWindowMutation(requestToStart)
             }
         }
     }
 
-    private func enqueueWindowMutation(_ request: WindowMutationRequest) {
-        guard let requestToStart = windowWrites.submit(
-            request,
-            coalescingKey: request.purpose.animationIdentifier
-        ) else {
-            return
-        }
-
-        startWindowMutation(requestToStart)
-    }
-
     private func startWindowMutation(_ request: WindowMutationRequest) {
         windowWriter.async { [weak self] in
-            let resolution = Self.performWindowMutation(request)
+            let succeeded = Self.performWindowMutation(request)
 
             DispatchQueue.main.async { [weak self] in
                 self?.windowMutationDidFinish(
                     request,
-                    resolution: resolution
+                    succeeded: succeeded
                 )
             }
         }
@@ -432,35 +208,18 @@ final class FocusedWindowMover: NSObject {
 
     private func windowMutationDidFinish(
         _ request: WindowMutationRequest,
-        resolution: MutationResolution
+        succeeded: Bool
     ) {
-        mutationDidFinish(request.purpose, resolution: resolution)
+        apply(
+            session.writeDidFinish(
+                request.purpose,
+                animationIdentifier: request.animationIdentifier,
+                succeeded: succeeded
+            )
+        )
 
         if let nextRequest = windowWrites.completeCurrentRequest() {
             startWindowMutation(nextRequest)
-        }
-    }
-
-    private func mutationDidFinish(
-        _ purpose: MutationPurpose,
-        resolution: MutationResolution
-    ) {
-        switch purpose {
-        case let .frame(animationIdentifier):
-            if resolution == .fail,
-               activeAnimation?.identifier == animationIdentifier {
-                stopAnimation(.positionWriteFailed)
-            }
-        case let .animationCompletion(animationIdentifier):
-            if activeAnimation?.identifier == animationIdentifier {
-                stopAnimation(
-                    resolution == .proceed
-                        ? .completed
-                        : .finalPlacementFailed
-                )
-            }
-        case .placement:
-            break
         }
     }
 
@@ -526,20 +285,19 @@ final class FocusedWindowMover: NSObject {
             return nil
         }
 
-        let mutationTarget: WindowMutationTarget
+        let target: WindowMutationTarget
         if application.processIdentifier
             == ProcessInfo.processInfo.processIdentifier {
             guard let keyWindow = NSApp.keyWindow, keyWindow.isVisible else {
                 return nil
             }
-            mutationTarget = .appKit(keyWindow)
+            target = .appKit(keyWindow)
         } else {
-            mutationTarget = .accessibility(window)
+            target = .accessibility(window)
         }
 
         return WindowSnapshot(
-            element: window,
-            mutationTarget: mutationTarget,
+            window: MovingWindow(element: window, target: target),
             frame: CGRect(origin: position, size: size)
         )
     }
@@ -584,15 +342,6 @@ final class FocusedWindowMover: NSObject {
         }
     }
 
-    private func screenSnapshots() -> [ScreenSnapshot] {
-        NSScreen.screens.map { screen in
-            ScreenSnapshot(
-                screen: screen,
-                geometry: GlobalScreenCoordinates.displayGeometry(of: screen)
-            )
-        }
-    }
-
     private func appKitFrame(from accessibilityFrame: CGRect) -> CGRect {
         GlobalScreenCoordinates.flipped(accessibilityFrame)
     }
@@ -621,11 +370,11 @@ final class FocusedWindowMover: NSObject {
 
     nonisolated private static func performWindowMutation(
         _ request: WindowMutationRequest
-    ) -> MutationResolution {
+    ) -> Bool {
         let messagingTimeout = switch request.purpose {
         case .frame:
             frameMessagingTimeout
-        case .animationCompletion, .placement:
+        case .finalPlacement, .settle:
             placementMessagingTimeout
         }
         AXClientContext.setMessagingTimeout(
@@ -643,11 +392,11 @@ final class FocusedWindowMover: NSObject {
             guard WindowMutationPolicy.accepts(
                 mutationOutcome(for: error)
             ) else {
-                return .fail
+                return false
             }
         }
 
-        return .proceed
+        return true
     }
 
     nonisolated private static func mutationOutcome(
@@ -697,14 +446,5 @@ final class FocusedWindowMover: NSObject {
                 value
             )
         }
-    }
-
-    private func easeInOutCubic(_ progress: CGFloat) -> CGFloat {
-        if progress < 0.5 {
-            return 4 * progress * progress * progress
-        }
-
-        let inverse = -2 * progress + 2
-        return 1 - inverse * inverse * inverse / 2
     }
 }

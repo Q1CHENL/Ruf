@@ -47,18 +47,19 @@ final class WindowMovementOutlineController {
     }
 
     func show(frame: CGRect) {
-        updateAppearance()
-        update(frame: frame)
-        if !panel.isVisible {
+        guard panel.isVisible else {
+            updateAppearance()
+            panel.setFrame(frame, display: true)
             panel.orderFrontRegardless()
+            return
         }
-    }
-
-    func update(frame: CGRect) {
         panel.setFrame(frame, display: true)
     }
 
     func hide() {
+        guard panel.isVisible else {
+            return
+        }
         panel.orderOut(nil)
     }
 

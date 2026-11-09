@@ -25,19 +25,6 @@ public enum WindowMovementAnimationStopReason: Equatable, Sendable {
             false
         }
     }
-
-    public static func beforeMove(
-        destinationExists: Bool,
-        focusedWindowMatches: Bool
-    ) -> Self? {
-        if !destinationExists {
-            return .displayConfigurationChanged
-        }
-        if !focusedWindowMatches {
-            return .focusedWindowChanged
-        }
-        return nil
-    }
 }
 
 public enum WindowMutationOutcome: Equatable, Sendable {
@@ -83,36 +70,6 @@ public struct WindowMovementPlan: Sendable {
 public enum WindowFrameMutation: Equatable, Sendable {
     case position(CGPoint)
     case size(CGSize)
-}
-
-public struct WindowMovementMutationPlan: Sendable {
-    public let destinationFrame: CGRect
-    private let sourceSize: CGSize
-
-    public init(from startFrame: CGRect, to destinationFrame: CGRect) {
-        sourceSize = startFrame.size
-        self.destinationFrame = destinationFrame
-    }
-
-    public var destinationPosition: CGPoint {
-        destinationFrame.origin
-    }
-
-    public var requiresResize: Bool {
-        sourceSize != destinationFrame.size
-    }
-
-    public var finalPlacementMutations: [WindowFrameMutation] {
-        guard requiresResize else {
-            return [.position(destinationPosition)]
-        }
-
-        return [
-            .position(destinationPosition),
-            .size(destinationFrame.size),
-            .position(destinationPosition),
-        ]
-    }
 }
 
 public enum WindowMovementPlanner {
