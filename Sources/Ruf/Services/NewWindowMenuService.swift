@@ -21,9 +21,10 @@ enum NewWindowMenuService {
         case unsupported
     }
 
-    private enum PressResult {
+    enum PressResult: Equatable {
         case delivered
         case stale
+        case failed
     }
 
     private static let messageTimeout: Float = 0.2
@@ -101,6 +102,8 @@ enum NewWindowMenuService {
                     guard DispatchTime.now() < deadline else {
                         return .unavailable
                     }
+                case .failed:
+                    return .unavailable
                 }
             case .retry:
                 previousCoverage = attempt.coverage
@@ -320,16 +323,34 @@ enum NewWindowMenuService {
     }
 
     private static func press(_ element: AXUIElement) -> PressResult {
+        pressResult(
+            for: AXClientContext.withDefaultIdentity {
+                AXUIElementPerformAction(
+                    element,
+                    kAXPressAction as CFString
+                )
+            }
+        )
+    }
+
+    // Pressing again is safe only when the error proves the first press never
+    // reached the application.
+    static func pressResult(for error: AXError) -> PressResult {
+        switch error {
+        case .success:
+            .delivered
+        // The messaging timeout expired while the application was still
+        // carrying out the press. Slow applications do this routinely, and a
+        // second press would open a second window.
+        case .cannotComplete:
+            .delivered
         // A fallback can be pressed a whole budget after it was read, by which
-        // point the menu may have been rebuilt. Reporting success without
-        // checking would turn that into a silently ignored request.
-        let error = AXClientContext.withDefaultIdentity {
-            AXUIElementPerformAction(
-                element,
-                kAXPressAction as CFString
-            )
+        // point the menu may have been rebuilt and the item is gone.
+        case .invalidUIElement:
+            .stale
+        default:
+            .failed
         }
-        return error == .success ? .delivered : .stale
     }
 
     private static func menuChildren(
