@@ -12,9 +12,12 @@ final class ApplicationResourceUsageMonitor {
         let launchDate: Date?
     }
 
-    private struct SamplerState {
+    /// What a session learned about a target. It outlives the selection so
+    /// a revisit shows a value at once, and the first fresh snapshot yields
+    /// CPU averaged over the time the selection was elsewhere.
+    private struct TargetUsage {
         var latestUsage: ApplicationResourceUsage
-        let task: Task<Void, Never>
+        var cpuBaseline = ProcessCPUUsageBaseline()
     }
 
     private let initialSampleInterval: Duration
@@ -23,9 +26,11 @@ final class ApplicationResourceUsageMonitor {
     private let snapshotProvider: SnapshotProvider
     private let onUpdate:
         @MainActor @Sendable (ApplicationResourceUsage) -> Void
-    private var samplers: [Target: SamplerState] = [:]
+    private var usageByTarget: [Target: TargetUsage] = [:]
+    // Only the selected target is sampled. A running task always belongs to
+    // it, and a cancelled one never touches the monitor's state again.
     private var selectedTarget: Target?
-    private var generation: UInt64 = 0
+    private var samplingTask: Task<Void, Never>?
 
     init(
         onUpdate: @escaping @MainActor @Sendable (
@@ -75,127 +80,47 @@ final class ApplicationResourceUsageMonitor {
         launchDate: Date?,
         isRunning: @escaping @MainActor @Sendable () -> Bool
     ) {
-        let nextTarget = Target(
+        let target = Target(
             processIdentifier: processIdentifier,
             launchDate: launchDate
         )
-        guard nextTarget.processIdentifier > 0,
+        guard target.processIdentifier > 0,
               isRunning() else {
-            selectedTarget = nil
+            deselect()
             onUpdate(unavailableUsage)
             return
         }
 
-        selectedTarget = nextTarget
-        if let sampler = samplers[nextTarget] {
-            onUpdate(sampler.latestUsage)
+        let usage = usageByTarget[target] ?? TargetUsage(
+            latestUsage: ApplicationResourceUsage(
+                cpuPercentage: nil,
+                memoryBytes: nil,
+                runningDuration: runningDuration(since: launchDate)
+            )
+        )
+        usageByTarget[target] = usage
+        onUpdate(usage.latestUsage)
+
+        guard target != selectedTarget else {
             return
         }
 
-        let initialUsage = ApplicationResourceUsage(
-            cpuPercentage: nil,
-            memoryBytes: nil,
-            runningDuration: runningDuration(
-                since: nextTarget.launchDate
-            )
-        )
-        onUpdate(initialUsage)
-
-        let expectedGeneration = generation
-        let task = Task { @MainActor [weak self] in
-            guard let self else {
-                return
-            }
-
-            let launchDate: Date?
-            if let knownLaunchDate = nextTarget.launchDate {
-                launchDate = knownLaunchDate
-            } else {
-                launchDate = await launchDateProvider(nextTarget.processIdentifier)
-            }
-            var cpuBaseline = ProcessCPUUsageBaseline()
-            var isFirstInterval = true
-
-            while !Task.isCancelled {
-                guard generation == expectedGeneration,
-                      samplers[nextTarget] != nil,
-                      isRunning() else {
-                    break
-                }
-
-                let processIdentifier = nextTarget.processIdentifier
-                let snapshot = await snapshotProvider(processIdentifier)
-                guard !Task.isCancelled,
-                      generation == expectedGeneration,
-                      samplers[nextTarget] != nil,
-                      isRunning() else {
-                    break
-                }
-
-                if let snapshot,
-                   let memoryBytes = snapshot.physicalFootprintBytes {
-                    publish(
-                        ApplicationResourceUsage(
-                            cpuPercentage: cpuBaseline.update(
-                                snapshot: snapshot
-                            ),
-                            memoryBytes: memoryBytes,
-                            runningDuration: runningDuration(
-                                since: launchDate
-                            )
-                        ),
-                        for: nextTarget,
-                        generation: expectedGeneration
-                    )
-                } else {
-                    cpuBaseline = ProcessCPUUsageBaseline()
-                    publish(
-                        ApplicationResourceUsage(
-                            cpuPercentage: nil,
-                            memoryBytes: nil,
-                            runningDuration: runningDuration(
-                                since: launchDate
-                            )
-                        ),
-                        for: nextTarget,
-                        generation: expectedGeneration
-                    )
-                }
-
-                do {
-                    try await Task.sleep(
-                        for: isFirstInterval
-                            ? initialSampleInterval
-                            : refreshInterval
-                    )
-                } catch {
-                    break
-                }
-                isFirstInterval = false
-            }
-
-            finishSampler(
-                for: nextTarget,
-                generation: expectedGeneration
-            )
+        samplingTask?.cancel()
+        selectedTarget = target
+        samplingTask = Task { [weak self] in
+            await self?.sample(target, isRunning: isRunning)
         }
-        samplers[nextTarget] = SamplerState(
-            latestUsage: initialUsage,
-            task: task
-        )
     }
 
     func deselect() {
+        samplingTask?.cancel()
+        samplingTask = nil
         selectedTarget = nil
     }
 
     func stopSession() {
-        generation &+= 1
-        for sampler in samplers.values {
-            sampler.task.cancel()
-        }
-        samplers.removeAll()
-        selectedTarget = nil
+        deselect()
+        usageByTarget.removeAll()
     }
 
     private var unavailableUsage: ApplicationResourceUsage {
@@ -210,38 +135,71 @@ final class ApplicationResourceUsageMonitor {
         launchDate.map { max(0, Date().timeIntervalSince($0)) }
     }
 
-    private func publish(
-        _ usage: ApplicationResourceUsage,
-        for target: Target,
-        generation expectedGeneration: UInt64
-    ) {
-        guard generation == expectedGeneration,
-              var sampler = samplers[target] else {
+    private func sample(
+        _ target: Target,
+        isRunning: @MainActor @Sendable () -> Bool
+    ) async {
+        var launchDate = target.launchDate
+        if launchDate == nil {
+            launchDate = await launchDateProvider(target.processIdentifier)
+        }
+
+        var interval = initialSampleInterval
+        while !Task.isCancelled, isRunning() {
+            let snapshot = await snapshotProvider(target.processIdentifier)
+            guard !Task.isCancelled else {
+                return
+            }
+            guard isRunning() else {
+                break
+            }
+
+            record(snapshot, for: target, launchDate: launchDate)
+
+            do {
+                try await Task.sleep(for: interval)
+            } catch {
+                return
+            }
+            interval = refreshInterval
+        }
+        guard !Task.isCancelled else {
             return
         }
 
-        sampler.latestUsage = usage
-        samplers[target] = sampler
-        guard selectedTarget == target else {
-            return
-        }
-        onUpdate(usage)
-    }
-
-    private func finishSampler(
-        for target: Target,
-        generation expectedGeneration: UInt64
-    ) {
-        guard generation == expectedGeneration else {
-            return
-        }
-
-        samplers[target] = nil
-        guard selectedTarget == target else {
-            return
-        }
+        // The application quit while selected.
+        usageByTarget[target] = nil
+        samplingTask = nil
         selectedTarget = nil
         onUpdate(unavailableUsage)
+    }
+
+    private func record(
+        _ snapshot: ProcessTreeResourceSnapshot?,
+        for target: Target,
+        launchDate: Date?
+    ) {
+        guard var usage = usageByTarget[target] else {
+            return
+        }
+
+        if let snapshot,
+           let memoryBytes = snapshot.physicalFootprintBytes {
+            usage.latestUsage = ApplicationResourceUsage(
+                cpuPercentage: usage.cpuBaseline.update(snapshot: snapshot),
+                memoryBytes: memoryBytes,
+                runningDuration: runningDuration(since: launchDate)
+            )
+        } else {
+            usage.cpuBaseline = ProcessCPUUsageBaseline()
+            usage.latestUsage = ApplicationResourceUsage(
+                cpuPercentage: nil,
+                memoryBytes: nil,
+                runningDuration: runningDuration(since: launchDate)
+            )
+        }
+        usageByTarget[target] = usage
+        onUpdate(usage.latestUsage)
     }
 
     nonisolated static func processLaunchDate(

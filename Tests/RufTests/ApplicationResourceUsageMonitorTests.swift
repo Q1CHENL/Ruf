@@ -1,12 +1,13 @@
 import Foundation
 import RufCore
+import Synchronization
 import XCTest
 
 @testable import Ruf
 
 @MainActor
 final class ApplicationResourceUsageMonitorTests: XCTestCase {
-    func testReusesApplicationSamplerWhenRevisitedWithinSession() async {
+    func testSamplesOnlyTheSelectedApplicationAndReusesItsLastSnapshot() async {
         let snapshots = ControlledSnapshotProvider()
         let recorder = ResourceUsageRecorder()
         let monitor = ApplicationResourceUsageMonitor(
@@ -29,12 +30,12 @@ final class ApplicationResourceUsageMonitorTests: XCTestCase {
             launchDate: Date(timeIntervalSince1970: 1),
             isRunning: { true }
         )
-        await snapshots.send(
+        snapshots.send(
             snapshot(pid: 101, time: 1_000, cpu: 100, memory: 101),
             to: 101
         )
         await waitForRequestCount(2, pid: 101, snapshots: snapshots)
-        await snapshots.send(
+        snapshots.send(
             snapshot(pid: 101, time: 2_000, cpu: 200, memory: 202),
             to: 101
         )
@@ -46,24 +47,19 @@ final class ApplicationResourceUsageMonitorTests: XCTestCase {
             launchDate: Date(timeIntervalSince1970: 2),
             isRunning: { true }
         )
-        await snapshots.send(
+        XCTAssertNil(recorder.latest.cpuPercentage)
+        snapshots.send(
             snapshot(pid: 202, time: 1_000, cpu: 100, memory: 303),
             to: 202
         )
         await waitForRequestCount(2, pid: 202, snapshots: snapshots)
-        await snapshots.send(
+        snapshots.send(
             snapshot(pid: 202, time: 2_000, cpu: 300, memory: 404),
             to: 202
         )
         await waitForRequestCount(3, pid: 202, snapshots: snapshots)
         XCTAssertEqual(recorder.latest.cpuPercentage, 20)
-
-        await snapshots.send(
-            snapshot(pid: 101, time: 3_000, cpu: 1_000, memory: 505),
-            to: 101
-        )
-        await waitForRequestCount(4, pid: 101, snapshots: snapshots)
-        XCTAssertEqual(recorder.latest.cpuPercentage, 20)
+        XCTAssertEqual(snapshots.requestCount(for: 101), 3)
 
         monitor.select(
             processIdentifier: 101,
@@ -71,8 +67,19 @@ final class ApplicationResourceUsageMonitorTests: XCTestCase {
             isRunning: { true }
         )
 
+        XCTAssertEqual(recorder.latest.cpuPercentage, 10)
+        XCTAssertEqual(recorder.latest.memoryBytes, 202)
+
+        await waitForRequestCount(4, pid: 101, snapshots: snapshots)
+        snapshots.send(
+            snapshot(pid: 101, time: 3_000, cpu: 1_000, memory: 505),
+            to: 101
+        )
+        await waitForRequestCount(5, pid: 101, snapshots: snapshots)
+
         XCTAssertEqual(recorder.latest.cpuPercentage, 80)
         XCTAssertEqual(recorder.latest.memoryBytes, 505)
+        XCTAssertEqual(snapshots.requestCount(for: 202), 3)
 
         monitor.stopSession()
         monitor.select(
@@ -84,7 +91,46 @@ final class ApplicationResourceUsageMonitorTests: XCTestCase {
         XCTAssertNil(recorder.latest.cpuPercentage)
 
         monitor.stopSession()
-        await snapshots.finish()
+        snapshots.finish()
+    }
+
+    func testReportsUnavailableUsageWhenTheSelectedApplicationQuits() async {
+        let snapshots = ControlledSnapshotProvider()
+        let recorder = ResourceUsageRecorder()
+        let running = RunningFlag()
+        let monitor = ApplicationResourceUsageMonitor(
+            initialSampleInterval: .zero,
+            refreshInterval: .zero,
+            launchDateProvider: { _ in nil },
+            snapshotProvider: { pid in
+                await snapshots.next(for: pid)
+            },
+            onUpdate: { recorder.latest = $0 }
+        )
+
+        monitor.select(
+            processIdentifier: 101,
+            launchDate: Date(timeIntervalSince1970: 1),
+            isRunning: { running.value }
+        )
+        snapshots.send(
+            snapshot(pid: 101, time: 1_000, cpu: 100, memory: 101),
+            to: 101
+        )
+        await waitForRequestCount(2, pid: 101, snapshots: snapshots)
+        XCTAssertEqual(recorder.latest.memoryBytes, 101)
+
+        running.value = false
+        snapshots.send(
+            snapshot(pid: 101, time: 2_000, cpu: 200, memory: 202),
+            to: 101
+        )
+        await waitForUpdate(recorder) { $0.runningDuration == nil }
+
+        XCTAssertNil(recorder.latest.memoryBytes)
+        XCTAssertEqual(snapshots.requestCount(for: 101), 2)
+        monitor.stopSession()
+        snapshots.finish()
     }
 
     func testResolvesMissingApplicationLaunchDate() async {
@@ -109,7 +155,7 @@ final class ApplicationResourceUsageMonitorTests: XCTestCase {
             launchDate: nil,
             isRunning: { true }
         )
-        await snapshots.send(
+        snapshots.send(
             snapshot(pid: 101, time: 1_000, cpu: 100, memory: 101),
             to: 101
         )
@@ -117,7 +163,7 @@ final class ApplicationResourceUsageMonitorTests: XCTestCase {
 
         XCTAssertEqual(recorder.latest.runningDuration ?? -1, 3_600, accuracy: 2)
         monitor.stopSession()
-        await snapshots.finish()
+        snapshots.finish()
     }
 
     func testUnavailableLaunchDateKeepsOtherMetricsAvailable() async {
@@ -138,7 +184,7 @@ final class ApplicationResourceUsageMonitorTests: XCTestCase {
             launchDate: nil,
             isRunning: { true }
         )
-        await snapshots.send(
+        snapshots.send(
             snapshot(pid: 101, time: 1_000, cpu: 100, memory: 101),
             to: 101
         )
@@ -147,7 +193,7 @@ final class ApplicationResourceUsageMonitorTests: XCTestCase {
         XCTAssertNil(recorder.latest.runningDuration)
         XCTAssertEqual(recorder.latest.memoryBytes, 101)
         monitor.stopSession()
-        await snapshots.finish()
+        snapshots.finish()
     }
 
     func testReadsCurrentProcessLaunchDateFromKernel() async throws {
@@ -169,9 +215,25 @@ final class ApplicationResourceUsageMonitorTests: XCTestCase {
         let clock = ContinuousClock()
         let deadline = clock.now.advanced(by: .seconds(1))
 
-        while await snapshots.requestCount(for: pid) < expectedCount {
+        while snapshots.requestCount(for: pid) < expectedCount {
             guard clock.now < deadline else {
                 XCTFail("Timed out waiting for resource sampler")
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(1))
+        }
+    }
+
+    private func waitForUpdate(
+        _ recorder: ResourceUsageRecorder,
+        until isExpected: (ApplicationResourceUsage) -> Bool
+    ) async {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .seconds(1))
+
+        while !isExpected(recorder.latest) {
+            guard clock.now < deadline else {
+                XCTFail("Timed out waiting for a resource usage update")
                 return
             }
             try? await Task.sleep(for: .milliseconds(1))
@@ -209,56 +271,102 @@ private final class ResourceUsageRecorder {
     )
 }
 
-private actor ControlledSnapshotProvider {
+@MainActor
+private final class RunningFlag {
+    var value = true
+}
+
+/// Hands out snapshots on request. A request whose task is cancelled, as
+/// the monitor's real sampler is, returns nil instead of consuming one.
+private final class ControlledSnapshotProvider: Sendable {
     private typealias Continuation = CheckedContinuation<
         ProcessTreeResourceSnapshot?,
         Never
     >
 
-    private var queuedSnapshots:
-        [pid_t: [ProcessTreeResourceSnapshot]] = [:]
-    private var continuations: [pid_t: [Continuation]] = [:]
-    private var requestCounts: [pid_t: Int] = [:]
-    private var isFinished = false
+    private struct Waiter {
+        let id: UInt64
+        let continuation: Continuation
+    }
+
+    private struct State {
+        var queuedSnapshots: [pid_t: [ProcessTreeResourceSnapshot]] = [:]
+        var waiters: [pid_t: [Waiter]] = [:]
+        var requestCounts: [pid_t: Int] = [:]
+        var nextRequestID: UInt64 = 0
+        var isFinished = false
+    }
+
+    private let state = Mutex(State())
 
     func next(for pid: pid_t) async -> ProcessTreeResourceSnapshot? {
-        requestCounts[pid, default: 0] += 1
-
-        if var queued = queuedSnapshots[pid], !queued.isEmpty {
-            let snapshot = queued.removeFirst()
-            queuedSnapshots[pid] = queued
-            return snapshot
-        }
-        guard !isFinished else {
-            return nil
+        let requestID = state.withLock { state in
+            state.requestCounts[pid, default: 0] += 1
+            state.nextRequestID += 1
+            return state.nextRequestID
         }
 
-        return await withCheckedContinuation { continuation in
-            continuations[pid, default: []].append(continuation)
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                let answer: ProcessTreeResourceSnapshot?? = state.withLock {
+                    state in
+                    if var queued = state.queuedSnapshots[pid],
+                       !queued.isEmpty {
+                        let snapshot = queued.removeFirst()
+                        state.queuedSnapshots[pid] = queued
+                        return .some(snapshot)
+                    }
+                    guard !state.isFinished, !Task.isCancelled else {
+                        return .some(nil)
+                    }
+
+                    state.waiters[pid, default: []].append(
+                        Waiter(id: requestID, continuation: continuation)
+                    )
+                    return .none
+                }
+                if case let .some(snapshot) = answer {
+                    continuation.resume(returning: snapshot)
+                }
+            }
+        } onCancel: {
+            let waiter = state.withLock { state -> Waiter? in
+                guard let index = state.waiters[pid]?.firstIndex(where: {
+                    $0.id == requestID
+                }) else {
+                    return nil
+                }
+                return state.waiters[pid]?.remove(at: index)
+            }
+            waiter?.continuation.resume(returning: nil)
         }
     }
 
     func send(_ snapshot: ProcessTreeResourceSnapshot, to pid: pid_t) {
-        if var waiting = continuations[pid], !waiting.isEmpty {
-            let continuation = waiting.removeFirst()
-            continuations[pid] = waiting
-            continuation.resume(returning: snapshot)
-        } else {
-            queuedSnapshots[pid, default: []].append(snapshot)
+        let waiter = state.withLock { state -> Waiter? in
+            if let waiters = state.waiters[pid], !waiters.isEmpty {
+                return state.waiters[pid]?.removeFirst()
+            }
+            state.queuedSnapshots[pid, default: []].append(snapshot)
+            return nil
         }
+        waiter?.continuation.resume(returning: snapshot)
     }
 
     func requestCount(for pid: pid_t) -> Int {
-        requestCounts[pid, default: 0]
+        state.withLock { $0.requestCounts[pid, default: 0] }
     }
 
     func finish() {
-        isFinished = true
-        let waiting = continuations.values.flatMap { $0 }
-        continuations.removeAll()
-        queuedSnapshots.removeAll()
-        for continuation in waiting {
-            continuation.resume(returning: nil)
+        let waiters = state.withLock { state in
+            state.isFinished = true
+            state.queuedSnapshots.removeAll()
+            let waiters = state.waiters.values.flatMap { $0 }
+            state.waiters.removeAll()
+            return waiters
+        }
+        for waiter in waiters {
+            waiter.continuation.resume(returning: nil)
         }
     }
 }
