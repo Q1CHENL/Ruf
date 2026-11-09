@@ -210,6 +210,9 @@ public struct WindowMovementMutationPlan: Sendable {
 
 public struct WindowMovementPlanner: Sendable {
     private static let fullSpanTolerance: CGFloat = 2
+    // Display arrangements never overlap, so neighbours share an edge
+    // exactly; the tolerance only absorbs rounding.
+    private static let edgeTolerance: CGFloat = 1
 
     public init() {}
 
@@ -332,6 +335,9 @@ public struct WindowMovementPlanner: Sendable {
         }
     }
 
+    /// Whether `candidate` lies entirely beyond the source's edge in
+    /// `direction`, so a display above or below never counts as a horizontal
+    /// neighbour (and vice versa) however its centre is offset.
     private func isInDirection(
         _ candidate: DisplayGeometry,
         from source: DisplayGeometry,
@@ -339,13 +345,13 @@ public struct WindowMovementPlanner: Sendable {
     ) -> Bool {
         switch direction {
         case .left:
-            candidate.frame.midX < source.frame.midX
+            candidate.frame.maxX <= source.frame.minX + Self.edgeTolerance
         case .right:
-            candidate.frame.midX > source.frame.midX
+            candidate.frame.minX >= source.frame.maxX - Self.edgeTolerance
         case .up:
-            candidate.frame.midY < source.frame.midY
+            candidate.frame.maxY <= source.frame.minY + Self.edgeTolerance
         case .down:
-            candidate.frame.midY > source.frame.midY
+            candidate.frame.minY >= source.frame.maxY - Self.edgeTolerance
         }
     }
 
@@ -383,6 +389,10 @@ public struct WindowMovementPlanner: Sendable {
         switch direction {
         case .left:
             return [
+                misalignment(
+                    source.frame.minY...source.frame.maxY,
+                    candidate.frame.minY...candidate.frame.maxY
+                ),
                 intervalGap(
                     source.frame.minY...source.frame.maxY,
                     candidate.frame.minY...candidate.frame.maxY
@@ -393,6 +403,10 @@ public struct WindowMovementPlanner: Sendable {
             ]
         case .right:
             return [
+                misalignment(
+                    source.frame.minY...source.frame.maxY,
+                    candidate.frame.minY...candidate.frame.maxY
+                ),
                 intervalGap(
                     source.frame.minY...source.frame.maxY,
                     candidate.frame.minY...candidate.frame.maxY
@@ -403,6 +417,10 @@ public struct WindowMovementPlanner: Sendable {
             ]
         case .up:
             return [
+                misalignment(
+                    source.frame.minX...source.frame.maxX,
+                    candidate.frame.minX...candidate.frame.maxX
+                ),
                 intervalGap(
                     source.frame.minX...source.frame.maxX,
                     candidate.frame.minX...candidate.frame.maxX
@@ -413,6 +431,10 @@ public struct WindowMovementPlanner: Sendable {
             ]
         case .down:
             return [
+                misalignment(
+                    source.frame.minX...source.frame.maxX,
+                    candidate.frame.minX...candidate.frame.maxX
+                ),
                 intervalGap(
                     source.frame.minX...source.frame.maxX,
                     candidate.frame.minX...candidate.frame.maxX
@@ -475,6 +497,18 @@ public struct WindowMovementPlanner: Sendable {
         ) <= Self.fullSpanTolerance
 
         return lowerEdgeMatches && upperEdgeMatches
+    }
+
+    /// 0 when the intervals share more than an edge, 1 when they only touch
+    /// or are apart: a display meeting the source at a corner is a weaker
+    /// neighbour than one sharing part of the source's edge.
+    private func misalignment(
+        _ lhs: ClosedRange<CGFloat>,
+        _ rhs: ClosedRange<CGFloat>
+    ) -> CGFloat {
+        let overlap = min(lhs.upperBound, rhs.upperBound)
+            - max(lhs.lowerBound, rhs.lowerBound)
+        return overlap > Self.edgeTolerance ? 0 : 1
     }
 
     private func intervalGap(

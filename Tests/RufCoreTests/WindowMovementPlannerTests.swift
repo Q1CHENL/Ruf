@@ -76,6 +76,64 @@ final class WindowMovementPlannerTests: XCTestCase {
         )
     }
 
+    func testOffsetSideBySideDisplaysAreNeighborsOnlyHorizontally() {
+        let left = display(x: 0, y: 0, width: 1_000, height: 800)
+        let right = display(x: 1_000, y: 300, width: 1_000, height: 800)
+        let displays = [left, right]
+
+        XCTAssertEqual(destination(from: left, .right, displays), right)
+        XCTAssertNil(destination(from: left, .down, displays))
+        XCTAssertNil(destination(from: left, .up, displays))
+        XCTAssertEqual(destination(from: right, .left, displays), left)
+        XCTAssertNil(destination(from: right, .up, displays))
+        XCTAssertNil(destination(from: right, .down, displays))
+    }
+
+    func testOffsetStackedDisplaysAreNeighborsOnlyVertically() {
+        let top = display(x: 0, y: 0, width: 1_000, height: 800)
+        let bottom = display(x: 300, y: 800, width: 1_000, height: 800)
+        let displays = [top, bottom]
+
+        XCTAssertEqual(destination(from: top, .down, displays), bottom)
+        XCTAssertNil(destination(from: top, .right, displays))
+        XCTAssertNil(destination(from: top, .left, displays))
+        XCTAssertEqual(destination(from: bottom, .up, displays), top)
+        XCTAssertNil(destination(from: bottom, .left, displays))
+        XCTAssertNil(destination(from: bottom, .right, displays))
+    }
+
+    func testBuiltInDisplayStraddlingBelowTwoExternalDisplays() {
+        let external = display(x: 0, y: 0, width: 2_560, height: 1_440)
+        let builtIn = display(x: 2_135, y: 1_440, width: 1_512, height: 982)
+        let sideExternal = display(x: 2_560, y: 360, width: 1_920, height: 1_080)
+        let displays = [external, builtIn, sideExternal]
+
+        XCTAssertEqual(destination(from: external, .right, displays), sideExternal)
+        XCTAssertEqual(destination(from: external, .down, displays), builtIn)
+        XCTAssertNil(destination(from: external, .left, displays))
+        XCTAssertNil(destination(from: external, .up, displays))
+
+        XCTAssertEqual(destination(from: sideExternal, .left, displays), external)
+        XCTAssertEqual(destination(from: sideExternal, .down, displays), builtIn)
+        XCTAssertNil(destination(from: sideExternal, .up, displays))
+        XCTAssertNil(destination(from: sideExternal, .right, displays))
+
+        XCTAssertEqual(destination(from: builtIn, .up, displays), sideExternal)
+        XCTAssertNil(destination(from: builtIn, .left, displays))
+        XCTAssertNil(destination(from: builtIn, .right, displays))
+        XCTAssertNil(destination(from: builtIn, .down, displays))
+    }
+
+    func testPrefersASharedEdgeOverADisplayTouchingOnlyAtACorner() {
+        let source = display(x: 1_000, y: 0, width: 1_000, height: 1_000)
+        let sharedEdge = display(x: 0, y: 990, width: 1_000, height: 1_000)
+        let cornerOnly = display(x: 800, y: -200, width: 200, height: 200)
+        let displays = [source, sharedEdge, cornerOnly]
+
+        XCTAssertEqual(destination(from: source, .left, displays), sharedEdge)
+        XCTAssertEqual(destination(from: source, .up, displays), cornerOnly)
+    }
+
     func testPreservesSizeAndRelativePlacementWithinVisibleFrames() throws {
         let source = DisplayGeometry(
             frame: CGRect(x: 0, y: 0, width: 1_000, height: 800),
@@ -313,6 +371,23 @@ final class WindowMovementPlannerTests: XCTestCase {
                 focusedWindowMatches: true
             )
         )
+    }
+
+    private func destination(
+        from source: DisplayGeometry,
+        _ direction: WindowMoveDirection,
+        _ displays: [DisplayGeometry]
+    ) -> DisplayGeometry? {
+        planner.plan(
+            windowFrame: CGRect(
+                x: source.visibleFrame.midX - 100,
+                y: source.visibleFrame.midY - 100,
+                width: 200,
+                height: 200
+            ),
+            displays: displays,
+            direction: direction
+        )?.destinationDisplay
     }
 
     private func display(
